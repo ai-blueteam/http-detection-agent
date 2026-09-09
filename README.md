@@ -6,6 +6,8 @@ The original engine code and project tooling are [MIT licensed](LICENSE). The de
 
 Use the `http-detect` CLI directly, or connect the optional [local MCP companion and portable agent skills](docs/AGENT_COMPANION.md) to Codex or Claude Code. The companion returns attributed scan summaries without exposing raw traffic and keeps MCP dependencies separate from the Rust engine.
 
+The optional legacy Parquet importer has a [known dependency security advisory](SECURITY.md#known-optional-importer-advisory). It is not enabled in the default CLI or MCP build; do not use it on untrusted files.
+
 The superset in [`rules/http-attacks.json`](rules/http-attacks.json) contains 76 detections across 62 families: the preserved 43-rule Cloudflare set and 33 additional detections gated by richer HTTP visibility. The latest expansion adds 23 test-status candidates with 51 positive and 72 negative fixtures. All original 53 rule definitions and their statuses are preserved. See [the expansion notes](docs/SUPERSET_EXPANSION.md) for coverage, adapter contracts, source decisions, and remaining gaps.
 
 ## What is covered
