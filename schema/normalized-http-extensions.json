@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Optional fields above the Cloudflare-compatible base model. Adapters advertise both fields and semantic capabilities; field presence alone is not sufficient for lossy representations.",
+  "fields": {
+    "requestbody": {
+      "type": "string",
+      "capability": "request_body",
+      "sensitivity": "high"
+    },
+    "responsebody": {
+      "type": "string",
+      "capability": "response_body",
+      "sensitivity": "high"
+    },
+    "requestheadersraw": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "raw_request_headers",
+      "sensitivity": "high"
+    },
+    "responseheadersraw": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "raw_response_headers",
+      "sensitivity": "high"
+    },
+    "destinationport": {
+      "type": "integer",
+      "capability": "destination_port",
+      "sensitivity": "low"
+    },
+    "uploadedfilenames": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "file_upload_metadata",
+      "sensitivity": "medium",
+      "description": "Client filenames from actual parsed file parts, before basename/path sanitization. Decode MIME filename quoting/filename* per the adapter's documented parser; preserve path separators and nulls. Never infer from ordinary JSON fields."
+    },
+    "uploadedfilecontents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "file_upload_content",
+      "sensitivity": "high",
+      "description": "One decoded textual content view per actual file part, preserving file boundaries; never concatenate parts or include ordinary form fields."
+    },
+    "multipartpartheaders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "multipart_metadata",
+      "sensitivity": "high",
+      "description": "One unfolded header line per actual multipart/form-data part. Preserve duplicate instances; exclude text in part contents."
+    },
+    "multipartcharsets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "multipart_metadata",
+      "sensitivity": "high",
+      "description": "Every parsed charset from part Content-Type and _charset_ fields, in encounter order, unquoted and trimmed. Do not discard repeated parameters or parts."
+    },
+    "graphqlfieldnames": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "graphql_ast",
+      "sensitivity": "high",
+      "description": "Actual field names in the selected GraphQL operation(s), including expanded fragments. Exclude aliases, comments, argument strings, and unused operations/fragments."
+    },
+    "graphqlmaxdepth": {
+      "type": "integer",
+      "minimum": 0,
+      "capability": "graphql_ast",
+      "sensitivity": "high",
+      "description": "Maximum selected-operation field depth after fragment expansion; root selection fields have depth 1."
+    },
+    "graphqlaliascount": {
+      "type": "integer",
+      "minimum": 0,
+      "capability": "graphql_ast",
+      "sensitivity": "high",
+      "description": "Maximum number of aliased field occurrences within a selected operation after fragment expansion."
+    },
+    "graphqlbatchsize": {
+      "type": "integer",
+      "minimum": 1,
+      "capability": "graphql_batch",
+      "sensitivity": "high",
+      "description": "Number of operation request objects in a validated HTTP GraphQL batch; a non-batched GraphQL request has size 1."
+    },
+    "jwtalgorithm": {
+      "type": "string",
+      "capability": "parsed_jwt",
+      "sensitivity": "high",
+      "description": "Exact alg string from the decoded JOSE protected header of the authentication JWT; exact case-sensitive JSON key selection, value unchanged."
+    },
+    "jwtkeyid": {
+      "type": "string",
+      "capability": "parsed_jwt",
+      "sensitivity": "high",
+      "description": "Exact kid string from that same decoded JOSE header, without URL decoding, path cleanup or verification-key resolution."
+    },
+    "requestjsonpaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "capability": "parsed_json_body",
+      "sensitivity": "high",
+      "description": "RFC 6901 JSON Pointers for every property in a fully parsed request JSON value, including intermediate objects and numeric array indices. Decode JSON escapes, then encode '~' as '~0' and '/' as '~1' in each key. Do not include values as paths."
+    }
+  },
+  "capabilities": {
+    "request_body": "Complete decoded HTTP request body is available within configured truncation limits.",
+    "response_body": "Complete decoded HTTP response body is available within configured truncation limits.",
+    "raw_request_headers": "Request headers preserve duplicate field instances and original ordering.",
+    "raw_response_headers": "Response headers preserve duplicate field instances and original ordering.",
+    "destination_port": "Origin-facing destination port is available.",
+    "file_upload_metadata": "Parsed upload filenames are available.",
+    "request_header_values": "Request header names and values are available in a case-insensitive map.",
+    "response_header_values": "Response header names and values are available in a case-insensitive map.",
+    "parsed_cookies": "Request cookies are available as a name/value map.",
+    "event_time": "A reliable event timestamp is available.",
+    "stateful_aggregation": "The adapter and engine permit bounded keyed window state.",
+    "cloudflare_security_actions": "Cloudflare security action metadata is available.",
+    "cloudflare_waf_scores": "Cloudflare WAF attack scores are available.",
+    "file_upload_content": "Parsed multipart file contents are captured as separate bounded decoded text elements. Field values are null if any relevant part is truncated, malformed or omitted; no archive extraction is implied.",
+    "multipart_metadata": "Multipart/form-data is parsed with bounded part/header counts and documented boundary/charset handling. All part header instances and charset declarations are preserved. Incomplete or ambiguous parse results are null.",
+    "graphql_ast": "Bounded GraphQL parser resolves operationName and fragments for the executable operation(s), rejects cycles/invalid documents and accounts for aliases/depth structurally. Failed or partial metrics are null. Directives are conservatively included; no schema authorization or resolver-cost knowledge is implied.",
+    "graphql_batch": "The adapter recognizes and validates HTTP GraphQL operation request objects on a GraphQL endpoint. It counts the envelope's operations, not arbitrary JSON array elements.",
+    "parsed_jwt": "The adapter structurally parses the authentication token as compact JWS (three base64url segments), decodes the protected header as a JSON object with unique case-sensitive keys and exports its string alg/kid. No signature verification, key fetching or trust decision is implied; malformed, duplicate-key, ambiguous multi-token and encrypted JWE input yields null.",
+    "parsed_json_body": "Complete bounded JSON body parsing with duplicate object keys rejected. Paths preserve decoded key identity with RFC 6901 escaping and include intermediate object keys. Invalid, truncated or depth/node-limit-exceeding bodies yield null."
+  }
+}

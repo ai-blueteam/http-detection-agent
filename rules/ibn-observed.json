@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "dataset": "normalized.http",
+  "timestamp_field": "edgeendtimestamp",
+  "regex_dialect": "rust-regex",
+  "description": "Opt-in candidate rule motivated by a 50000-row discovery sample from Internet-background-noise. Unlabeled corpus counts are coverage evidence, not accuracy scores.",
+  "sources": [{
+    "id": "ibn-dataset",
+    "name": "burpheart Internet Background Noise",
+    "url": "https://huggingface.co/datasets/burpheart/Internet-background-noise",
+    "revision": "a92ffd4bb88d12a9c8860c375d4135fe24d0c4ce",
+    "license": "Apache-2.0",
+    "scope_note": "Independent detection logic derived from observed request shapes; source IPs and live payload destinations are excluded from fixtures. D-Link path/system semantics corroborated by NVD CVE-2024-3273."
+  }],
+  "rules": [
+    {
+      "id": "http.exploit.dlink-nas-system-command",
+      "family": "http.exploit.dlink-nas-system-command",
+      "variant": "uri",
+      "title": "D-Link NAS system-command endpoint exploit attempt",
+      "description": "Identifies the conjunction of the NAS sharing CGI endpoint, messagebus account, command 15 and a populated system parameter. Recognizes encoded command delivery without executing or decoding base64. Does not establish a vulnerable destination or successful execution.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": ["CVE-2024-3272", "CVE-2024-3273"],
+      "attack": {"techniques": ["T1190"]},
+      "required_fields": ["clientrequesturi"],
+      "requirements": {"all_fields": ["clientrequesturi"], "any_fields": [], "capabilities": []},
+      "match": {"all": [
+        {"field": "clientrequesturi", "op": "regex", "value": "(?:^|/)cgi-bin/nas_sharing\\.cgi\\?", "transforms": ["url_decode_1"]},
+        {"field": "clientrequesturi", "op": "regex", "value": "[?&]user=messagebus(?:&|$)", "transforms": ["url_decode_1"]},
+        {"field": "clientrequesturi", "op": "regex", "value": "[?&]cmd=15(?:&|$)", "transforms": ["url_decode_1"]},
+        {"field": "clientrequesturi", "op": "regex", "value": "[?&]system=[^&]+", "transforms": ["url_decode_1"]}
+      ]},
+      "provenance": [{"source": "ibn-dataset", "upstream_ids": ["http-2024-10m", "CVE-2024-3273"], "path": "http-2024-10m.parquet: discovery rows 0..49999, nas_sharing.cgi request shape", "authors": ["burpheart (dataset)", "HTTP Threat Engine contributors (independent rule)"], "relationship": "derived"}],
+      "false_positives": ["Authorized exploit validation or replay; an arbitrary destination can receive this request."],
+      "tuning": "Keep opt-in/test until environment-specific review. No block action is authorized."
+    }
+  ]
+}

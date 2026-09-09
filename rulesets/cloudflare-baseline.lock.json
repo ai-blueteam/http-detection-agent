@@ -1,0 +1,6 @@
+{
+  "description": "Immutable content lock for the preserved Cloudflare rule definitions. Deliberately excludes catalog-level source metadata and description. Update only for an explicitly approved Cloudflare rule revision.",
+  "rule_count": 43,
+  "rules_sha256": "3f00708280b408dee74ac0474a56be77d1fb7c962c9cb602acf8aace1268acf6",
+  "canonicalization": "UTF-8 JSON of the ordered rules array, recursively sorted object keys, compact separators, non-ASCII preserved, followed by one LF (jq -S -c '.rules')."
+}

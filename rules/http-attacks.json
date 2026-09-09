@@ -1,0 +1,5565 @@
+{
+  "schema_version": "1.0.0",
+  "dataset": "normalized.http",
+  "timestamp_field": "edgeendtimestamp",
+  "regex_dialect": "rust-regex",
+  "description": "Deduplicated inbound HTTP attack detections normalized for Cloudflare Log Explorer http_requests events.",
+  "normalization_contract": {
+    "field_names": "lowercase",
+    "missing_values": "null",
+    "url_decode": "percent-decode without converting plus to space",
+    "header_names": "case-insensitive"
+  },
+  "sources": [
+    {
+      "id": "crs",
+      "name": "OWASP ModSecurity Core Rule Set",
+      "url": "https://github.com/coreruleset/coreruleset",
+      "revision": "4cfbeecdb815d1f6b10e52214fe9cb72008f2318",
+      "license": "Apache-2.0",
+      "scope_note": "Generic HTTP attack classes adapted for the normalized field model, including capability-gated request, upload, multipart and response variants. Not a drop-in CRS replacement."
+    },
+    {
+      "id": "sigma",
+      "name": "SigmaHQ main rule repository",
+      "url": "https://github.com/SigmaHQ/sigma",
+      "revision": "5c9b21756f4e3ba137c1773ac9ba5a8332188961",
+      "license": "DRL-1.1",
+      "scope_note": "Webserver signatures only. Author attribution is retained on every derived rule and must also appear in alert output."
+    },
+    {
+      "id": "gcp-security-analytics",
+      "name": "Google Cloud security analytics",
+      "url": "https://github.com/GoogleCloudPlatform/security-analytics",
+      "revision": "2dd8565557e043e25d16df8f7743b9e69374d6f3",
+      "license": "Apache-2.0",
+      "scope_note": "HTTP load-balancer detections that can be expressed using the Cloudflare event contract."
+    },
+    {
+      "id": "chronicle-community",
+      "name": "Google SecOps community detection rules",
+      "url": "https://github.com/chronicle/detection-rules/tree/main/rules/community",
+      "revision": "234e9223c3b8f3d1c30209d9663797ba69057533",
+      "license": "Apache-2.0",
+      "scope_note": "Community YARA-L rules with directly mappable inbound HTTP fields."
+    },
+    {
+      "id": "mitre-car",
+      "name": "MITRE Cyber Analytics Repository",
+      "url": "https://github.com/mitre-attack/car",
+      "revision": "1b922fe1527d956e222a99473472e594f10f610b",
+      "license": "Apache-2.0",
+      "scope_note": "No CAR analytic is directly an HTTP attack signature. CAR-2021-01-001 contributes the distinct-target scanning model adapted here to URI enumeration."
+    },
+    {
+      "id": "splunk-security-content",
+      "name": "Splunk Security Content",
+      "url": "https://github.com/splunk/security_content",
+      "revision": "4cd62e811c5eddf1245c780d48823d7b38998566",
+      "license": "Apache-2.0",
+      "scope_note": "HTTP behavior mapped from Splunk Web detections, including URI rules and locally refined payload conjunctions. Endpoint-only, alert-only and outbound context is not fabricated."
+    },
+    {
+      "id": "elastic-detection-rules",
+      "name": "Elastic Security detection rules",
+      "url": "https://github.com/elastic/detection-rules/tree/main/rules",
+      "revision": "66280fda4dcf380021135f1a305c19aee46807e3",
+      "license": "Elastic-2.0",
+      "scope_note": "cPanel/WHM and React2Shell variants are retained with required HTTP capabilities and Elastic-2.0 provenance. Endpoint and packet context unavailable in normalized HTTP remains excluded."
+    },
+    {
+      "id": "owasp-cheatsheets",
+      "name": "OWASP Cheat Sheet Series",
+      "url": "https://github.com/OWASP/CheatSheetSeries",
+      "revision": "382113ba1fbd7e99ffa21bcf90d7fd8a19be546b",
+      "license": "CC-BY-SA-4.0",
+      "scope_note": "Guidance adapted into locally authored candidate heuristics for uploads, XML/JSON, GraphQL and JWT. Thresholds are local policy choices, not upstream executable detection rules."
+    }
+  ],
+  "rules": [
+    {
+      "id": "http.native.cloudflare-security-action",
+      "title": "Cloudflare security control acted on request",
+      "description": "Surfaces a request on which a Cloudflare security control took a non-allow action.",
+      "kind": "event",
+      "status": "production",
+      "severity": "medium",
+      "confidence": "high",
+      "category": "native_waf",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "securityaction",
+        "securityactions"
+      ],
+      "match": {
+        "any": [
+          {
+            "field": "securityaction",
+            "op": "not_in",
+            "values": [
+              "",
+              "allow",
+              "unknown"
+            ],
+            "transforms": [
+              "lowercase"
+            ]
+          },
+          {
+            "field": "securityactions",
+            "op": "array_contains_any",
+            "values": [
+              "block",
+              "challenge",
+              "managedchallenge",
+              "jschallenge",
+              "log"
+            ],
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "949110"
+          ],
+          "path": "rules/REQUEST-949-BLOCKING-EVALUATION.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Expected policy enforcement and explicitly configured logging actions."
+      ],
+      "tuning": "Treat this as high-confidence telemetry, not proof that exploitation succeeded. Suppress known policy-only rule IDs if necessary.",
+      "requirements": {
+        "all_fields": [],
+        "any_fields": [
+          [
+            "securityaction",
+            "securityactions"
+          ]
+        ],
+        "capabilities": [
+          "cloudflare_security_actions"
+        ]
+      },
+      "family": "http.native.cloudflare-security-action",
+      "variant": "event"
+    },
+    {
+      "id": "http.native.cloudflare-waf-score",
+      "title": "Cloudflare WAF attack score indicates likely attack",
+      "description": "Detects low Cloudflare attack scores, where lower non-zero values represent higher attack likelihood.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "native_waf",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "wafattackscore",
+        "wafsqliattackscore",
+        "wafxssattackscore",
+        "wafrceattackscore"
+      ],
+      "match": {
+        "any": [
+          {
+            "all": [
+              {
+                "field": "wafattackscore",
+                "op": "gt",
+                "value": 0
+              },
+              {
+                "field": "wafattackscore",
+                "op": "lte",
+                "value": 20
+              }
+            ]
+          },
+          {
+            "all": [
+              {
+                "field": "wafsqliattackscore",
+                "op": "gt",
+                "value": 0
+              },
+              {
+                "field": "wafsqliattackscore",
+                "op": "lte",
+                "value": 20
+              }
+            ]
+          },
+          {
+            "all": [
+              {
+                "field": "wafxssattackscore",
+                "op": "gt",
+                "value": 0
+              },
+              {
+                "field": "wafxssattackscore",
+                "op": "lte",
+                "value": 20
+              }
+            ]
+          },
+          {
+            "all": [
+              {
+                "field": "wafrceattackscore",
+                "op": "gt",
+                "value": 0
+              },
+              {
+                "field": "wafrceattackscore",
+                "op": "lte",
+                "value": 20
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "949110"
+          ],
+          "path": "rules/REQUEST-949-BLOCKING-EVALUATION.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Benign requests misclassified by managed detection models."
+      ],
+      "tuning": "Keep the non-zero guard because zero can mean not scored. Adjust the maximum only after measuring local precision.",
+      "requirements": {
+        "all_fields": [],
+        "any_fields": [
+          [
+            "wafattackscore",
+            "wafsqliattackscore",
+            "wafxssattackscore",
+            "wafrceattackscore"
+          ]
+        ],
+        "capabilities": [
+          "cloudflare_waf_scores"
+        ]
+      },
+      "family": "http.native.cloudflare-waf-score",
+      "variant": "event"
+    },
+    {
+      "id": "http.recon.scanner-user-agent",
+      "title": "Known web scanner user agent",
+      "description": "Detects default user agents from common web reconnaissance and exploitation tools.",
+      "kind": "event",
+      "status": "production",
+      "severity": "medium",
+      "confidence": "high",
+      "category": "reconnaissance",
+      "attack": {
+        "techniques": [
+          "T1595.002",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestuseragent"
+      ],
+      "match": {
+        "field": "clientrequestuseragent",
+        "op": "regex",
+        "value": "(?:commix/|feroxbuster/|fuzz faster u fool|gobuster/|nikto/|nmap scripting engine|recon-ng/v|sqlmap/|whatweb/|wfuzz/|wpscan v|zgrab/|acunetix|dirbuster|nuclei)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "913100"
+          ],
+          "path": "rules/REQUEST-913-SCANNER-DETECTION.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "19aa4f58-94ca-45ff-bc34-92e533c0994a"
+          ],
+          "path": "rules/web/webserver_generic/web_susp_useragents.yml",
+          "authors": [
+            "Nasreddine Bencherchali (Nextron Systems)",
+            "Tim Shelton"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "04430b4e-5ca8-4e88-98b5-d6bcf54f8393"
+          ],
+          "path": "detections/web/http_scripting_tool_user_agent.yml",
+          "authors": [
+            "Raven Tait",
+            "Splunk"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Authorized vulnerability scanning and penetration tests."
+      ],
+      "tuning": "Allowlist scanner egress addresses rather than removing tool tokens.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestuseragent"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.recon.scanner-user-agent",
+      "variant": "event"
+    },
+    {
+      "id": "http.protocol.risky-method",
+      "title": "Risky or uncommon HTTP method",
+      "description": "Detects methods commonly disabled on public applications or associated with proxy tunneling and debugging.",
+      "kind": "event",
+      "status": "production",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1090",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod"
+      ],
+      "match": {
+        "field": "clientrequestmethod",
+        "op": "in",
+        "values": [
+          "CONNECT",
+          "TRACE",
+          "TRACK"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "911100"
+          ],
+          "path": "rules/REQUEST-911-METHOD-ENFORCEMENT.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Legitimate forward proxy CONNECT traffic or deliberate TRACE diagnostics."
+      ],
+      "tuning": "Enable per host; CONNECT is usually invalid for an origin-facing application.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.protocol.risky-method",
+      "variant": "event"
+    },
+    {
+      "id": "http.protocol.method-override",
+      "title": "HTTP method override parameter",
+      "description": "Detects an attempt to override the request method through a query parameter.",
+      "kind": "event",
+      "status": "production",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:[?&](?:_method|x-http-method-override)=)(?:delete|put|patch|trace|connect)(?:&|$)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_1"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "920650"
+          ],
+          "path": "rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Frameworks that intentionally use method override parameters."
+      ],
+      "tuning": "Allowlist only the routes where method override is an intended feature.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.protocol.method-override",
+      "variant": "event"
+    },
+    {
+      "id": "http.protocol.request-smuggling",
+      "title": "HTTP request smuggling header conflict",
+      "description": "Detects simultaneous Content-Length and Transfer-Encoding headers or multiple conflicting transfer encodings.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestheaders"
+      ],
+      "match": {
+        "any": [
+          {
+            "all": [
+              {
+                "field": "requestheaders",
+                "op": "map_key_exists",
+                "key": "content-length"
+              },
+              {
+                "field": "requestheaders",
+                "op": "map_key_exists",
+                "key": "transfer-encoding"
+              }
+            ]
+          },
+          {
+            "field": "requestheaders",
+            "op": "map_key_value_regex",
+            "key": "transfer-encoding",
+            "value": "(?:,|\\bchunked\\b.*\\bchunked\\b)",
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "920181",
+            "921110"
+          ],
+          "path": "rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf; rules/REQUEST-921-PROTOCOL-ATTACK.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "97d85f98-9d15-41a0-8682-7030454875e7",
+            "1606cc5b-fd5f-4865-9fe3-0ed1eaec2df6"
+          ],
+          "path": "detections/web/http_possible_request_smuggling.yml; detections/web/http_duplicated_header.yml",
+          "authors": [
+            "Raven Tait",
+            "Splunk"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Intermediaries that preserve both headers after safely normalizing the request."
+      ],
+      "tuning": "This rule depends on requestheaders retention; keep exact raw header multiplicity if the ingest format can represent it.",
+      "requirements": {
+        "all_fields": [
+          "requestheaders"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_header_values"
+        ]
+      },
+      "family": "http.protocol.request-smuggling",
+      "variant": "header_map"
+    },
+    {
+      "id": "http.protocol.crlf-injection",
+      "title": "CRLF or HTTP header injection in URI",
+      "description": "Detects encoded carriage-return or newline sequences followed by a header-like token.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:%0d(?:%0a)?|%0a)(?:[a-z0-9-]{2,40}%3a|[a-z0-9-]{2,40}:)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "921120",
+            "921130",
+            "921140",
+            "921150",
+            "921151",
+            "921160"
+          ],
+          "path": "rules/REQUEST-921-PROTOCOL-ATTACK.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Applications intentionally accepting encoded multiline content in a query value."
+      ],
+      "tuning": "Do not URL-decode before this match; it intentionally detects encoded CR/LF bytes.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.protocol.crlf-injection",
+      "variant": "event"
+    },
+    {
+      "id": "http.protocol.encoding-evasion",
+      "title": "Multiple encoding or null-byte evasion",
+      "description": "Detects double-encoded traversal/metacharacters, overlong UTF-8 traversal forms, and encoded null bytes.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1027",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:%25(?:2e|2f|5c|3c|3e|27|22)|%c0%a[ef]|%e0%80%a[ef]|%00)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "920230",
+            "920240",
+            "920250",
+            "920270"
+          ],
+          "path": "rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Applications transporting already URL-encoded data as a value."
+      ],
+      "tuning": "Prefer endpoint exclusions to globally weakening this evasion signal.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.protocol.encoding-evasion",
+      "variant": "event"
+    },
+    {
+      "id": "http.lfi.path-traversal",
+      "title": "Path traversal attempt",
+      "description": "Detects literal, encoded, double-encoded, slash-reversed, and overlong-UTF traversal sequences.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "path_traversal",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:\\.\\.[/\\\\]|%2e%2e(?:%2f|%5c)|%252e%252e(?:%252f|%255c)|%c0%af|%c1%9c)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "930100",
+            "930110"
+          ],
+          "path": "rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "7745c2ea-24a5-4290-b680-04359cb84b35"
+          ],
+          "path": "rules/web/webserver_generic/web_path_traversal_exploitation_attempt.yml",
+          "authors": [
+            "Subhash Popuri (@pbssubhash)",
+            "Florian Roth (Nextron Systems)",
+            "Thurein Oo",
+            "Nasreddine Bencherchali (Nextron Systems)"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Documentation, security training, or search endpoints containing traversal examples."
+      ],
+      "tuning": "Suppress known content routes; do not exclude based only on 404 because unsuccessful exploit attempts remain useful.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.lfi.path-traversal",
+      "variant": "event"
+    },
+    {
+      "id": "http.lfi.sensitive-file",
+      "title": "Sensitive local file or development artifact probe",
+      "description": "Detects requests for operating-system credentials, repository metadata, environment files, backup files, and AI coding-assistant artifacts.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "file_disclosure",
+      "attack": {
+        "techniques": [
+          "T1005",
+          "T1083",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:^|/)(?:\\.env(?:\\.[a-z0-9_-]+)?|\\.git/(?:config|head|index)|etc/(?:passwd|shadow|hosts)|proc/self/environ|windows/win\\.ini|web\\.config|id_rsa|credentials|\\.aws/credentials|\\.npmrc|\\.docker/config\\.json|\\.vscode/|\\.idea/|\\.claude/|\\.cursor/)(?:$|[/?])|(?:\\.(?:bak|backup|old|orig|save|swp|sql|zip|tar|gz))(?:$|[?])",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "920500",
+            "930120",
+            "930121",
+            "930130",
+            "930140"
+          ],
+          "path": "rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf; rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "953d460b-f810-420a-97a2-cfca4c98e602"
+          ],
+          "path": "rules/web/webserver_generic/web_source_code_enumeration.yml",
+          "authors": [
+            "James Ahearn"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Public documentation or intentionally served archive files."
+      ],
+      "tuning": "Split by asset type if different response teams own source exposure and OS-file probing.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.lfi.sensitive-file",
+      "variant": "event"
+    },
+    {
+      "id": "http.rfi.remote-file-include",
+      "title": "Remote file inclusion attempt",
+      "description": "Detects URL-valued parameters commonly used to load remote code or templates.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "rfi",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "[?&](?:file|path|page|template|include|require|document|folder|root|dir|load|url)=(?:https?|ftp):(?://|%2f%2f)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_1"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "931100",
+            "931110",
+            "931120",
+            "931130",
+            "931131"
+          ],
+          "path": "rules/REQUEST-931-APPLICATION-ATTACK-RFI.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Legitimate URL import, webhook, preview, or fetch features."
+      ],
+      "tuning": "Restrict this rule to endpoints that should never fetch a remote resource, or maintain an allowlist of destination hosts.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.rfi.remote-file-include",
+      "variant": "event"
+    },
+    {
+      "id": "http.ssrf.cloud-metadata",
+      "title": "Cloud instance metadata SSRF probe",
+      "description": "Detects cloud metadata endpoints embedded in a request URI.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "ssrf",
+      "attack": {
+        "techniques": [
+          "T1552.005",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:169\\.254\\.169\\.254|metadata\\.google\\.internal|100\\.100\\.100\\.200|fd00:ec2::254|metadata/instance|latest/meta-data|computeMetadata/v1)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "934110",
+            "934120",
+            "934190"
+          ],
+          "path": "rules/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Security documentation or test payloads submitted through an application."
+      ],
+      "tuning": "Any match on a fetch-capable endpoint should be investigated urgently.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.ssrf.cloud-metadata",
+      "variant": "event"
+    },
+    {
+      "id": "http.rce.unix-command-injection",
+      "title": "Unix command injection payload",
+      "description": "Detects shell separators or substitutions followed by high-signal system commands.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "command_injection",
+      "attack": {
+        "techniques": [
+          "T1059.004",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:;|\\||&&|`|\\$\\()(?:[ \\t]*(?:id|whoami|uname|cat|curl|wget|nc|bash|sh|chmod|chown|python|perl|ruby|busybox)\\b)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "932130",
+            "932160",
+            "932220",
+            "932230",
+            "932231",
+            "932235",
+            "932239",
+            "932250",
+            "932260",
+            "932270",
+            "932340"
+          ],
+          "path": "rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Developer tools or search interfaces receiving shell syntax as content."
+      ],
+      "tuning": "Body content is absent from the target log schema, so this covers URI and query payloads only.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.rce.unix-command-injection",
+      "variant": "request_uri"
+    },
+    {
+      "id": "http.rce.shellshock",
+      "title": "Shellshock exploit payload",
+      "description": "Detects the Shellshock function prefix followed by shell metacharacters in URI, user agent, referer, or request header values.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2014-6271"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi",
+        "clientrequestuseragent",
+        "clientrequestreferer",
+        "requestheaders"
+      ],
+      "match": {
+        "any": [
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "\\(\\)\\s*\\{[^}]*\\}\\s*;",
+            "transforms": [
+              "url_decode_2"
+            ]
+          },
+          {
+            "field": "clientrequestuseragent",
+            "op": "regex",
+            "value": "\\(\\)\\s*\\{[^}]*\\}\\s*;"
+          },
+          {
+            "field": "clientrequestreferer",
+            "op": "regex",
+            "value": "\\(\\)\\s*\\{[^}]*\\}\\s*;"
+          },
+          {
+            "field": "requestheaders",
+            "op": "map_value_regex",
+            "value": "\\(\\)\\s*\\{[^}]*\\}\\s*;"
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "932170",
+            "932171"
+          ],
+          "path": "rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Security testing payloads."
+      ],
+      "tuning": "This is a high-confidence legacy exploit signature; alert even when the response is 4xx.",
+      "requirements": {
+        "all_fields": [],
+        "any_fields": [
+          [
+            "clientrequesturi",
+            "clientrequestuseragent",
+            "clientrequestreferer",
+            "requestheaders"
+          ]
+        ],
+        "capabilities": []
+      },
+      "family": "http.rce.shellshock",
+      "variant": "event"
+    },
+    {
+      "id": "http.rce.windows-webshell-command",
+      "title": "Windows command or webshell payload in URI",
+      "description": "Detects common Windows discovery and execution commands passed as request parameters.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "webshell",
+      "attack": {
+        "techniques": [
+          "T1059.003",
+          "T1505.003"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "in",
+            "values": [
+              "GET",
+              "POST"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "[?&][^=]{0,40}=(?:cmd\\s*/[crk]|powershell|whoami|net\\s+user|tasklist|wmic|ipconfig|certutil|nltest|dsquery|curl|wget|python3?|ssh)(?:\\s|[+&]|$)",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_2"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "932120",
+            "932125",
+            "932140",
+            "932370",
+            "932371",
+            "932380"
+          ],
+          "path": "rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "7ff9db12-1b94-4a79-ba68-a2402c5d6729"
+          ],
+          "path": "rules/web/webserver_generic/web_win_webshells_in_access_logs.yml",
+          "authors": [
+            "Florian Roth (Nextron Systems)",
+            "Nasreddine Bencherchali (Nextron Systems)"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Wiki, documentation, or search routes containing command examples."
+      ],
+      "tuning": "Exclude content/search routes rather than broad command names.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.rce.windows-command",
+      "variant": "event"
+    },
+    {
+      "id": "http.injection.php",
+      "title": "PHP code or wrapper injection",
+      "description": "Detects PHP tags, dangerous stream wrappers, serialized objects, and high-risk function calls in the URI.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "code_injection",
+      "attack": {
+        "techniques": [
+          "T1059.006",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:<\\?(?:php|=)|php://(?:input|filter)|data://text/plain|phar://|O:[0-9]+:\\x22|(?:eval|assert|system|exec|passthru|shell_exec|proc_open)\\s*\\()",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "933100",
+            "933140",
+            "933150",
+            "933160",
+            "933170",
+            "933200"
+          ],
+          "path": "rules/REQUEST-933-APPLICATION-ATTACK-PHP.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Programming documentation or code-search applications."
+      ],
+      "tuning": "Route exclusions are safer than deleting individual dangerous function names.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.injection.php",
+      "variant": "request_uri"
+    },
+    {
+      "id": "http.injection.node-prototype-pollution",
+      "title": "Node.js prototype pollution or code injection",
+      "description": "Detects prototype-chain keys and common Node.js process execution constructs in request parameters.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "code_injection",
+      "attack": {
+        "techniques": [
+          "T1059.007",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:__proto__|constructor(?:\\.|%2e)prototype|child_process|process(?:\\.|%2e)(?:mainModule|binding)|require\\s*\\([^)]*(?:child_process|fs))",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "934100",
+            "934101",
+            "934130"
+          ],
+          "path": "rules/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "JavaScript documentation, package registries, and source browsers."
+      ],
+      "tuning": "Raise confidence when keys occur as parameter names rather than free text.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.injection.node-prototype-pollution",
+      "variant": "event"
+    },
+    {
+      "id": "http.injection.ldap",
+      "title": "LDAP injection expression",
+      "description": "Detects encoded or literal LDAP filter operators combined with common identity attributes.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "code_injection",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:\\(|%28)(?:[|&!]|%7c|%26|%21)(?:\\(|%28)?(?:uid|cn|sn|mail|objectclass)(?:=|%3d)(?:\\*|%2a)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "921200"
+          ],
+          "path": "rules/REQUEST-921-PROTOCOL-ATTACK.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Applications that intentionally expose LDAP-filter syntax."
+      ],
+      "tuning": "Promote to production after validating URI encoding against local traffic.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.injection.ldap",
+      "variant": "event"
+    },
+    {
+      "id": "http.sqli.generic",
+      "title": "SQL injection payload",
+      "description": "Combines high-signal SQL union, boolean, timing, metadata, comment, and command-execution patterns into one canonical alert.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "sqli",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:union(?:\\s+all)?\\s+select|(?:or|and)\\s+[\\x22\\x27]?[0-9]+[\\x22\\x27]?\\s*=\\s*[\\x22\\x27]?[0-9]+|information_schema(?:\\.|%2e)(?:tables|columns)|@@version|(?:sleep|pg_sleep|benchmark)\\s*\\(|waitfor\\s+delay|load_file\\s*\\(|into\\s+(?:out|dump)file|xp_cmdshell|order\\s+by\\s+[0-9]+|select\\s+(?:database|version)\\s*\\(|/\\*!?[0-9]{0,6}\\s*(?:select|union)|(?:--|#|/\\*)\\s*$)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "942100",
+            "942101",
+            "942130",
+            "942140",
+            "942160",
+            "942170",
+            "942180",
+            "942190",
+            "942200",
+            "942250",
+            "942280",
+            "942320",
+            "942350",
+            "942361",
+            "942440",
+            "942500",
+            "942530",
+            "942540"
+          ],
+          "path": "rules/REQUEST-942-APPLICATION-ATTACK-SQLI.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "5513deaf-f49a-46c2-a6c8-3f111b5cb453"
+          ],
+          "path": "rules/web/webserver_generic/web_sql_injection_in_access_logs.yml",
+          "authors": [
+            "Saw Win Naung",
+            "Nasreddine Bencherchali (Nextron Systems)",
+            "Thurein Oo (Yoma Bank)"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Search, documentation, observability, and code-hosting routes containing SQL text."
+      ],
+      "tuning": "Do not exclude 404 responses globally; use route-aware suppression and score native WAF corroboration higher.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.sqli",
+      "variant": "request_uri"
+    },
+    {
+      "id": "http.xss.generic",
+      "title": "Cross-site scripting payload",
+      "description": "Detects scriptable tags, event handlers, JavaScript URIs, and browser object access after bounded canonicalization.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "xss",
+      "attack": {
+        "techniques": [
+          "T1189",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:<\\s*(?:script|iframe|svg|img|object|embed)\\b|javascript\\s*:|(?:onerror|onload|onmouseover|onfocus|onresize)\\s*=|document\\.(?:cookie|domain|location)|(?:alert|prompt|confirm)\\s*\\()",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "941100",
+            "941101",
+            "941110",
+            "941120",
+            "941130",
+            "941140",
+            "941160",
+            "941170",
+            "941320",
+            "941380"
+          ],
+          "path": "rules/REQUEST-941-APPLICATION-ATTACK-XSS.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "65354b83-a2ea-4ea6-8414-3ab38be0d409"
+          ],
+          "path": "rules/web/webserver_generic/web_xss_in_access_logs.yml",
+          "authors": [
+            "Saw Win Naung",
+            "Nasreddine Bencherchali"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Web development, documentation, WYSIWYG editor, and code-search routes."
+      ],
+      "tuning": "Use endpoint-aware exclusions. The transform order is security-relevant and must be bounded to two URL decodes.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.xss",
+      "variant": "request_uri"
+    },
+    {
+      "id": "http.ssti.generic",
+      "title": "Server-side template injection payload",
+      "description": "Detects common Jinja, Twig, Freemarker, Java EL, ERB, and Spring expression syntax in URI values.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "ssti",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:=\\s*\\{\\{|=\\s*\\$\\{|=\\s*#\\{|=\\s*<%=|freemarker\\.template\\.utility\\.execute|javax\\.script\\.scriptenginemanager|org\\.apache\\.commons\\.io\\.ioutils|\\{\\{[^}]{0,120}(?:config|class|mro|subclasses|cycler|joiner))",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "934180",
+            "934200"
+          ],
+          "path": "rules/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "ada3bc4f-f0fd-42b9-ba91-e105e8af7342"
+          ],
+          "path": "rules/web/webserver_generic/web_ssti_in_access_logs.yml",
+          "authors": [
+            "Nasreddine Bencherchali (Nextron Systems)"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Template playgrounds, documentation, and source-code search."
+      ],
+      "tuning": "Escalate matches that contain both expression delimiters and a dangerous object or class token.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.ssti",
+      "variant": "request_uri"
+    },
+    {
+      "id": "http.java.serialized-object",
+      "title": "Java serialized object or gadget payload",
+      "description": "Detects Java serialization magic bytes and common gadget or runtime execution tokens in an HTTP URI.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "deserialization",
+      "cves": [
+        "CVE-2015-4852",
+        "CVE-2017-9805"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:\\xac\\xed\\x00\\x05|rO0AB|java\\.lang\\.(?:runtime|processbuilder)|getruntime\\(\\)\\.exec\\(|commonscollections|beanutils|ysoserial)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "944100",
+            "944110",
+            "944120",
+            "944130",
+            "944200",
+            "944210",
+            "944240",
+            "944250",
+            "944260"
+          ],
+          "path": "rules/REQUEST-944-APPLICATION-ATTACK-JAVA.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "583aa0a2-30b1-4d62-8bf3-ab73689efe6c"
+          ],
+          "path": "rules/web/webserver_generic/web_java_payload_in_access_logs.yml",
+          "authors": [
+            "frack113",
+            "Harjot Singh",
+            "@cyb3rjy0t"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Java development documentation or artifact inspection endpoints."
+      ],
+      "tuning": "The schema does not include request bodies, so serialized POST bodies are out of scope unless separately ingested.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.java.deserialization",
+      "variant": "request_uri"
+    },
+    {
+      "id": "http.exploit.log4shell",
+      "title": "Log4Shell JNDI lookup",
+      "description": "Detects literal or URL-encoded JNDI lookup expressions in URI, user agent, referer, or request header values.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2021-44228"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi",
+        "clientrequestuseragent",
+        "clientrequestreferer",
+        "requestheaders"
+      ],
+      "match": {
+        "any": [
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "(?:\\$|%24)(?:\\{|%7b)[^}]{0,200}j[^}]{0,20}n[^}]{0,20}d[^}]{0,20}i(?:\\s|%20)*(?::|%3a)",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "clientrequestuseragent",
+            "op": "regex",
+            "value": "\\$\\{[^}]{0,200}j[^}]{0,20}n[^}]{0,20}d[^}]{0,20}i\\s*:",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "clientrequestreferer",
+            "op": "regex",
+            "value": "\\$\\{[^}]{0,200}j[^}]{0,20}n[^}]{0,20}d[^}]{0,20}i\\s*:",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "requestheaders",
+            "op": "map_value_regex",
+            "value": "\\$\\{[^}]{0,200}j[^}]{0,20}n[^}]{0,20}d[^}]{0,20}i\\s*:",
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "944150",
+            "944151",
+            "944152"
+          ],
+          "path": "rules/REQUEST-944-APPLICATION-ATTACK-JAVA.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "gcp-security-analytics",
+          "upstream_ids": [
+            "6.21",
+            "6.22"
+          ],
+          "path": "backends/bigquery/sql/6_21_log4j_exploit_attempts.sql; backends/chronicle/yaral/6_21_log4j_exploit_attempts.yaral",
+          "authors": [
+            "Google LLC",
+            "Don Sailing (CYDERES)",
+            "Olivier BARESCUT (Google)"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "158b68fa-5d1a-11ec-aac8-acde48001122",
+            "c184f12e-5c90-11ec-bf1f-497c9a704a72"
+          ],
+          "path": "detections/web/hunting_for_log4shell.yml; detections/web/log4shell_jndi_payload_injection_attempt.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk",
+            "Jose Hernandez"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Security scanners, honeypots, and content that intentionally stores exploit strings."
+      ],
+      "tuning": "Preserve header values in requestheaders; attackers commonly place this payload outside the URI.",
+      "requirements": {
+        "all_fields": [],
+        "any_fields": [
+          [
+            "clientrequesturi",
+            "clientrequestuseragent",
+            "clientrequestreferer",
+            "requestheaders"
+          ]
+        ],
+        "capabilities": []
+      },
+      "family": "http.exploit.log4shell",
+      "variant": "request_metadata"
+    },
+    {
+      "id": "http.exploit.jndi-kit-path",
+      "title": "JNDI exploit kit endpoint",
+      "description": "Detects distinctive JNDI-Exploit-Kit payload-serving endpoints.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "/(?:Basic/(?:Command/Base64|ReverseShell|TomcatMemshell|JettyMemshell|WeblogicMemshell|JBossMemshell|WebsphereMemshell|SpringMemshell)|Deserialization/(?:URLDNS|CommonsCollections|CommonsBeanutils|Jre8u20)|(?:Tomcat|Groovy|Websphere)Bypass/)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "412d55bc-7737-4d25-9542-5b396867ce55"
+          ],
+          "path": "rules/web/webserver_generic/web_jndi_exploit.yml",
+          "authors": [
+            "Florian Roth (Nextron Systems)"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Research systems intentionally mirroring exploit-kit paths."
+      ],
+      "tuning": "This is a narrow, high-confidence path signature and should rarely need tuning.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.jndi-kit-path",
+      "variant": "event"
+    },
+    {
+      "id": "http.webshell.regeorg",
+      "title": "ReGeorg webshell protocol",
+      "description": "Detects ReGeorg command parameters combined with POST and absent user-agent and referer values.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "webshell",
+      "attack": {
+        "techniques": [
+          "T1505.003",
+          "T1090"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi",
+        "clientrequestmethod",
+        "clientrequestuseragent",
+        "clientrequestreferer"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "(?:[?&]cmd=(?:read|connect|disconnect|forward)(?:&|$)|[?&]connect&target=)",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "any": [
+              {
+                "field": "clientrequestuseragent",
+                "op": "is_null"
+              },
+              {
+                "field": "clientrequestuseragent",
+                "op": "eq",
+                "value": ""
+              }
+            ]
+          },
+          {
+            "any": [
+              {
+                "field": "clientrequestreferer",
+                "op": "is_null"
+              },
+              {
+                "field": "clientrequestreferer",
+                "op": "eq",
+                "value": ""
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "2ea44a60-cfda-11ea-87d0-0242ac130003"
+          ],
+          "path": "rules/web/webserver_generic/web_webshell_regeorg.yml",
+          "authors": [
+            "Cian Heasley"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Applications using the same generic command parameter vocabulary."
+      ],
+      "tuning": "If empty values are normalized to null at ingest, the rule already handles both representations.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi",
+          "clientrequestmethod",
+          "clientrequestuseragent",
+          "clientrequestreferer"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.webshell.regeorg",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.f5-icontrol-bash",
+      "title": "F5 BIG-IP iControl bash endpoint request",
+      "description": "Detects POST requests to the F5 iControl REST utility bash endpoint.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "attack": {
+        "techniques": [
+          "T1190",
+          "T1059.004"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequestpath",
+        "clientrequesturi"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "any": [
+              {
+                "field": "clientrequestpath",
+                "op": "ends_with",
+                "value": "/mgmt/tm/util/bash"
+              },
+              {
+                "field": "clientrequesturi",
+                "op": "regex",
+                "value": "/mgmt/tm/util/bash(?:[?#]|$)",
+                "flags": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "85254a62-22be-4239-b79c-2ec17e566c37",
+            "b59c98c6-95e8-4d65-93ee-f594dfb96b17"
+          ],
+          "path": "rules/web/webserver_generic/web_f5_tm_utility_bash_api_request.yml; rules/web/proxy_generic/proxy_f5_tm_utility_bash_api_request.yml",
+          "authors": [
+            "Nasreddine Bencherchali (Nextron Systems)",
+            "Thurein Oo"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate F5 administration through this endpoint."
+      ],
+      "tuning": "Limit legitimate administration to trusted source addresses, then alert on all other matches.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod"
+        ],
+        "any_fields": [
+          [
+            "clientrequestpath",
+            "clientrequesturi"
+          ]
+        ],
+        "capabilities": []
+      },
+      "family": "http.exploit.f5-icontrol-bash",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.spring4shell",
+      "title": "Spring4Shell exploit parameters",
+      "description": "Detects the class-loader property chain and JSP command parameter patterns used in Spring4Shell probes.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2022-22965"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi"
+      ],
+      "match": {
+        "field": "clientrequesturi",
+        "op": "regex",
+        "value": "(?:[?&][^#]{0,300}class(?:\\.module)?\\.classloader[^=]{0,200}=|\\.jsp\\??[^#]{0,300}(?:cmd|pwd)=)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_1"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "gcp-security-analytics",
+          "upstream_ids": [
+            "6.23"
+          ],
+          "path": "backends/bigquery/sql/6_23_spring4shell_exploit_attempts.sql; backends/chronicle/yaral/6_23_spring4shell_exploit_attempts.yaral",
+          "authors": [
+            "Google LLC",
+            "Olivier BARESCUT (Google)"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "9d44d649-7d67-4559-95c1-8022ff49420b",
+            "fcdfd69d-0ca3-4476-920e-9b633cb4593e"
+          ],
+          "path": "detections/web/spring4shell_payload_url_request.yml; detections/web/web_spring4shell_http_request_class_module.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Requests carrying Java property names as documentation or test content."
+      ],
+      "tuning": "The upstream detection explicitly covers URL/query variants only; request-body-only exploitation remains invisible.",
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.spring4shell",
+      "variant": "request_uri"
+    },
+    {
+      "id": "http.exploit.sharepoint-toolpane",
+      "title": "SharePoint ToolPane exploitation chain",
+      "description": "Detects the POST path, query parameters, and signout referrer associated with CVE-2025-49706 exploitation.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2025-49706",
+        "CVE-2025-53770"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "clientrequestreferer"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "/_layouts/1[56]/ToolPane\\.aspx",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "contains",
+            "value": "DisplayMode=Edit",
+            "transforms": [
+              "url_decode_1"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "(?:[?&])a=/ToolPane\\.aspx(?:&|$)",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_1"
+            ]
+          },
+          {
+            "field": "clientrequestreferer",
+            "op": "regex",
+            "value": "/_layouts/1[56]/signout\\.aspx(?:\\?.*)?$",
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "chronicle-community",
+          "upstream_ids": [
+            "mr_661defd1-34e0-47ef-8073-a761244714e3"
+          ],
+          "path": "rules/community/microsoft/sharepoint/ttp_sharepoint_cve_2025_49706_exploitation.yaral",
+          "authors": [
+            "Google Cloud Security"
+          ],
+          "relationship": "derived"
+        },
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "508b2649-3a1e-4a4c-ba9d-3cc05e1a1b70"
+          ],
+          "path": "detections/web/windows_sharepoint_toolpane_endpoint_exploitation_attempt.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Rare legitimate administrative use of the exact ToolPane chain."
+      ],
+      "tuning": "Keep all four request constraints together to preserve the upstream rule's precision.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "clientrequestreferer"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.sharepoint-toolpane",
+      "variant": "event"
+    },
+    {
+      "id": "http.recon.iis-shortname",
+      "title": "Successful IIS shortname enumeration probe",
+      "description": "Detects successful IIS tilde shortname fuzzing requests.",
+      "kind": "event",
+      "status": "test",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "reconnaissance",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "in",
+            "values": [
+              "GET",
+              "OPTIONS"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "contains",
+            "value": "~1",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "ends_with",
+            "value": "a.aspx",
+            "transforms": [
+              "path_only",
+              "lowercase"
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "in",
+            "values": [
+              200,
+              301
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "7cb02516-6d95-4ffc-8eee-162075e111ac"
+          ],
+          "path": "rules/web/webserver_generic/web_iis_tilt_shortname_scan.yml",
+          "authors": [
+            "frack113"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate legacy IIS paths containing tilde aliases."
+      ],
+      "tuning": "Only enable on IIS-backed applications; this preserves the upstream success-status requirement.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.recon.iis-shortname",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.coldfusion-file-read",
+      "title": "Adobe ColdFusion arbitrary file read endpoint",
+      "description": "Detects successful POST requests to the ColdFusion CKEditor path used by CVE-2023-26360 probes.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2023-26360"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequestpath",
+        "clientrequesturi",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "any": [
+              {
+                "field": "clientrequestpath",
+                "op": "starts_with",
+                "value": "/cf_scripts/scripts/ajax/ckeditor/"
+              },
+              {
+                "field": "clientrequesturi",
+                "op": "contains",
+                "value": "/cf_scripts/scripts/ajax/ckeditor/",
+                "flags": [
+                  "i"
+                ]
+              }
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "eq",
+            "value": 200
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "695aceae-21db-4e7f-93ac-a52e39d02b93"
+          ],
+          "path": "detections/web/adobe_coldfusion_unauthenticated_arbitrary_file_read.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate ColdFusion CKEditor requests to the same legacy route."
+      ],
+      "tuning": "Restrict to hosts that run ColdFusion; retain the success status to match the upstream detection.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [
+          [
+            "clientrequestpath",
+            "clientrequesturi"
+          ]
+        ],
+        "capabilities": []
+      },
+      "family": "http.exploit.coldfusion-file-read",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.confluence-ognl",
+      "title": "Confluence pre-auth OGNL injection endpoint",
+      "description": "Detects successful POST requests to the Confluence Velocity template endpoint used by CVE-2023-22527.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2023-22527"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "contains",
+            "value": "/template/aui/text-inline.vm",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "in",
+            "values": [
+              200,
+              202
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "f56936c0-ae6f-4eeb-91ff-ecc1448c6105"
+          ],
+          "path": "detections/web/confluence_pre_auth_rce_via_ognl_injection_cve_2023_22527.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate Confluence requests to the template endpoint."
+      ],
+      "tuning": "Enable only for Confluence assets. Body-level OGNL confirmation is unavailable in the Cloudflare schema.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.confluence-ognl",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.screenconnect-setupwizard",
+      "title": "ConnectWise ScreenConnect SetupWizard authentication bypass",
+      "description": "Detects successful POST requests to alternate SetupWizard paths used for ScreenConnect authentication bypass.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2024-1708",
+        "CVE-2024-1709"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "/SetupWizard(?:\\.aspx)?/(?:[^?#]+)?(?:[?#]|$)",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "eq",
+            "value": 200
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "d3f7a803-e802-448b-8eb2-e796b223bfff"
+          ],
+          "path": "detections/web/connectwise_screenconnect_authentication_bypass.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate initial ScreenConnect setup activity."
+      ],
+      "tuning": "Any SetupWizard access after initial deployment is suspicious; restrict by ScreenConnect host.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.screenconnect-setupwizard",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.ivanti-command-injection",
+      "title": "Ivanti Connect Secure command injection chain",
+      "description": "Detects successful requests to traversal-based Ivanti API paths associated with authentication bypass and command injection.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2023-46805",
+        "CVE-2024-21887"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "in",
+            "values": [
+              "GET",
+              "POST"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "/api/v1/totp/user-backup-code/(?:\\.\\./){2}(?:system/maintenance/archiving/cloud-server-test-connection|license/keys-status/)",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_1"
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "eq",
+            "value": 200
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "1f32a7e0-a060-4545-b7de-73fcf9ad536e"
+          ],
+          "path": "detections/web/ivanti_connect_secure_command_injection_attempts.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Authorized vulnerability scans against an Ivanti appliance."
+      ],
+      "tuning": "Restrict to Ivanti hosts and allowlist approved scanner sources.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.ivanti-command-injection",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.jenkins-cli-file-read",
+      "title": "Jenkins CLI arbitrary file read request",
+      "description": "Detects a successful POST to the Jenkins CLI remoting endpoint used by CVE-2024-23897.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2024-23897"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "/cli\\?(?:[^#&]+&)*remoting=false(?:&|$)",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "eq",
+            "value": 200
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "c641260d-2b48-4eb1-b1e8-2cc5b8b99ab1"
+          ],
+          "path": "detections/web/jenkins_arbitrary_file_read_cve_2024_23897.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate Jenkins CLI remoting-disabled sessions."
+      ],
+      "tuning": "Restrict to Jenkins hosts and correlate with unusual CLI use or exposed-controller access.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.jenkins-cli-file-read",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.wordpress-bricks-rce",
+      "title": "WordPress Bricks Builder render endpoint RCE attempt",
+      "description": "Detects a successful POST to the Bricks Builder render endpoint used by CVE-2024-25600.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "medium",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2024-25600"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequestpath",
+        "clientrequesturi",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "any": [
+              {
+                "field": "clientrequestpath",
+                "op": "ends_with",
+                "value": "/wp-json/bricks/v1/render_element"
+              },
+              {
+                "field": "clientrequesturi",
+                "op": "regex",
+                "value": "/wp-json/bricks/v1/render_element(?:[?#]|$)",
+                "flags": [
+                  "i"
+                ]
+              }
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "eq",
+            "value": 200
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "56a8771a-3fda-4959-b81d-2f266e2f679f"
+          ],
+          "path": "detections/web/wordpress_bricks_builder_plugin_rce.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate Bricks Builder rendering requests."
+      ],
+      "tuning": "This is route-level detection because request bodies are unavailable; correlate with WAF RCE score and restrict to vulnerable plugin assets.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [
+          [
+            "clientrequestpath",
+            "clientrequesturi"
+          ]
+        ],
+        "capabilities": []
+      },
+      "family": "http.exploit.wordpress-bricks-rce",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.tomcat-session-deserialization",
+      "title": "Tomcat session deserialization trigger",
+      "description": "Detects the dotted JSESSIONID and server error combination used to trigger a previously uploaded malicious Tomcat session.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "deserialization",
+      "cves": [
+        "CVE-2025-24813"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190",
+          "T1505.003"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "cookies",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "GET"
+          },
+          {
+            "field": "cookies",
+            "op": "map_key_value_regex",
+            "key": "JSESSIONID",
+            "value": "^\\.[^;]{1,128}$",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "eq",
+            "value": 500
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "e28b4fd4-8f5a-41cd-8222-2f1ccca53ef1"
+          ],
+          "path": "detections/web/tomcat_session_deserialization_attempt.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "A legitimate application using dotted JSESSIONID values and returning 500."
+      ],
+      "tuning": "Enable on Tomcat assets and correlate with a prior PUT request that uploaded a session file.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "cookies",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "parsed_cookies"
+        ]
+      },
+      "family": "http.exploit.tomcat-session-deserialization",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.fortinet-auth-bypass",
+      "title": "Fortinet administrative API authentication bypass path",
+      "description": "Detects access to the Fortinet system administrator API associated with CVE-2022-40684.",
+      "kind": "event",
+      "status": "test",
+      "severity": "critical",
+      "confidence": "medium",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2022-40684"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "in",
+            "values": [
+              "GET",
+              "PUT"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "contains",
+            "value": "/api/v2/cmdb/system/admin",
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "fortinet_appliance_auth_bypass"
+          ],
+          "path": "detections/web/fortinet_appliance_auth_bypass.yml",
+          "authors": [
+            "Splunk Threat Research Team"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Legitimate Fortinet administrator API use, especially GET inventory requests."
+      ],
+      "tuning": "Restrict to Fortinet management hosts and trusted administrator source ranges; consider requiring PUT for higher precision.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": []
+      },
+      "family": "http.exploit.fortinet-auth-bypass",
+      "variant": "event"
+    },
+    {
+      "id": "http.exploit.cpanel-crlf-auth-bypass",
+      "title": "cPanel WHM CRLF authentication bypass response shape",
+      "description": "Detects GET-root requests with Basic authorization that receive a redirect to a newly minted cPanel session path.",
+      "kind": "event",
+      "status": "experimental",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2026-41940"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequestpath",
+        "requestheaders",
+        "responseheaders",
+        "edgeresponsestatus"
+      ],
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "GET"
+          },
+          {
+            "field": "clientrequestpath",
+            "op": "eq",
+            "value": "/"
+          },
+          {
+            "field": "requestheaders",
+            "op": "map_key_value_regex",
+            "key": "authorization",
+            "value": "^Basic\\s+",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "gte",
+            "value": 300
+          },
+          {
+            "field": "edgeresponsestatus",
+            "op": "lte",
+            "value": 399
+          },
+          {
+            "field": "responseheaders",
+            "op": "map_key_value_regex",
+            "key": "location",
+            "value": "^/cpsess[0-9]+(?:/|$)",
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "elastic-detection-rules",
+          "upstream_ids": [
+            "2449be9d-2fdf-4126-a85b-f05e4058df9f"
+          ],
+          "path": "rules/network/initial_access_potential_cpanel_whm_crlf_authentication_bypass.toml",
+          "authors": [
+            "Elastic"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized vulnerability scanners reproducing the exploit shape."
+      ],
+      "tuning": "Cloudflare lacks destination port, so enable only for hostnames serving cPanel or WHM. Exact raw duplicate headers and decoded Basic content are not available.",
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequestpath",
+          "requestheaders",
+          "responseheaders",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_header_values",
+          "response_header_values"
+        ]
+      },
+      "family": "http.exploit.cpanel-crlf-auth-bypass",
+      "variant": "event"
+    },
+    {
+      "id": "http.authentication.failed-login-burst",
+      "title": "Repeated failed login requests from one client",
+      "description": "Detects a burst of denied requests to common authentication endpoints from one client IP.",
+      "kind": "aggregate",
+      "status": "production",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "authentication_attack",
+      "attack": {
+        "techniques": [
+          "T1110"
+        ]
+      },
+      "required_fields": [
+        "edgeendtimestamp",
+        "clientip",
+        "clientrequestpath",
+        "edgeresponsestatus"
+      ],
+      "aggregate": {
+        "group_by": [
+          "clientip"
+        ],
+        "window_seconds": 300,
+        "prefilter": {
+          "all": [
+            {
+              "field": "clientrequestpath",
+              "op": "regex",
+              "value": "(?:^|/)(?:login|signin|auth|session|oauth/token|wp-login\\.php)(?:/|$)",
+              "flags": [
+                "i"
+              ]
+            },
+            {
+              "field": "edgeresponsestatus",
+              "op": "in",
+              "values": [
+                400,
+                401,
+                403,
+                429
+              ]
+            }
+          ]
+        },
+        "metrics": [
+          {
+            "name": "failures",
+            "op": "count"
+          },
+          {
+            "name": "targets",
+            "op": "distinct_count",
+            "field": "clientrequestpath"
+          }
+        ],
+        "having": {
+          "metric": "failures",
+          "op": "gte",
+          "value": 20
+        }
+      },
+      "provenance": [
+        {
+          "source": "mitre-car",
+          "upstream_ids": [
+            "CAR-2021-01-001"
+          ],
+          "path": "analytics/CAR-2021-01-001.yaml",
+          "authors": [
+            "Cyware Labs",
+            "MITRE"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Shared NATs, broken clients, load tests, and password-manager retries."
+      ],
+      "tuning": "Tune paths and threshold per application; use a user or account dimension if separately available.",
+      "requirements": {
+        "all_fields": [
+          "edgeendtimestamp",
+          "clientip",
+          "clientrequestpath",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "event_time",
+          "stateful_aggregation"
+        ]
+      },
+      "family": "http.authentication.failed-login-burst",
+      "variant": "aggregate"
+    },
+    {
+      "id": "http.recon.path-enumeration",
+      "title": "High-cardinality path enumeration",
+      "description": "Detects a client probing many distinct paths with many unsuccessful responses.",
+      "kind": "aggregate",
+      "status": "production",
+      "severity": "medium",
+      "confidence": "high",
+      "category": "reconnaissance",
+      "attack": {
+        "techniques": [
+          "T1595.002"
+        ]
+      },
+      "required_fields": [
+        "edgeendtimestamp",
+        "clientip",
+        "clientrequestpath",
+        "edgeresponsestatus"
+      ],
+      "aggregate": {
+        "group_by": [
+          "clientip"
+        ],
+        "window_seconds": 300,
+        "metrics": [
+          {
+            "name": "requests",
+            "op": "count"
+          },
+          {
+            "name": "distinct_paths",
+            "op": "distinct_count",
+            "field": "clientrequestpath"
+          },
+          {
+            "name": "errors",
+            "op": "count",
+            "where": {
+              "field": "edgeresponsestatus",
+              "op": "gte",
+              "value": 400
+            }
+          }
+        ],
+        "having": {
+          "all": [
+            {
+              "metric": "requests",
+              "op": "gte",
+              "value": 40
+            },
+            {
+              "metric": "distinct_paths",
+              "op": "gte",
+              "value": 25
+            },
+            {
+              "metric": "errors",
+              "op": "gte",
+              "value": 20
+            }
+          ]
+        }
+      },
+      "provenance": [
+        {
+          "source": "mitre-car",
+          "upstream_ids": [
+            "CAR-2021-01-001"
+          ],
+          "path": "analytics/CAR-2021-01-001.yaml",
+          "authors": [
+            "Cyware Labs",
+            "MITRE"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "913100"
+          ],
+          "path": "rules/REQUEST-913-SCANNER-DETECTION.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Search crawlers, cache warmers, uptime fleets, and front-end asset bursts."
+      ],
+      "tuning": "Exclude verified bots and known internal scanners; tune thresholds by host traffic profile.",
+      "requirements": {
+        "all_fields": [
+          "edgeendtimestamp",
+          "clientip",
+          "clientrequestpath",
+          "edgeresponsestatus"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "event_time",
+          "stateful_aggregation"
+        ]
+      },
+      "family": "http.recon.path-enumeration",
+      "variant": "aggregate"
+    },
+    {
+      "id": "http.recon.sensitive-path-sweep",
+      "title": "Repeated sensitive-path discovery sweep",
+      "description": "Detects one client probing multiple distinct administrative, repository, secret, and framework paths.",
+      "kind": "aggregate",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "reconnaissance",
+      "attack": {
+        "techniques": [
+          "T1595.002",
+          "T1083"
+        ]
+      },
+      "required_fields": [
+        "edgeendtimestamp",
+        "clientip",
+        "clientrequestpath"
+      ],
+      "aggregate": {
+        "group_by": [
+          "clientip"
+        ],
+        "window_seconds": 600,
+        "prefilter": {
+          "field": "clientrequestpath",
+          "op": "regex",
+          "value": "(?:/\\.git|/\\.env|/wp-admin|/wp-login\\.php|/xmlrpc\\.php|/phpmyadmin|/admin(?:/|$)|/actuator|/server-status|/cgi-bin|/vendor/phpunit|/boaform|/HNAP1|/autodiscover)",
+          "flags": [
+            "i"
+          ]
+        },
+        "metrics": [
+          {
+            "name": "probes",
+            "op": "count"
+          },
+          {
+            "name": "distinct_targets",
+            "op": "distinct_count",
+            "field": "clientrequestpath"
+          }
+        ],
+        "having": {
+          "all": [
+            {
+              "metric": "probes",
+              "op": "gte",
+              "value": 6
+            },
+            {
+              "metric": "distinct_targets",
+              "op": "gte",
+              "value": 4
+            }
+          ]
+        }
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "913100",
+            "920500",
+            "930130"
+          ],
+          "path": "rules/REQUEST-913-SCANNER-DETECTION.conf; rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf; rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "953d460b-f810-420a-97a2-cfca4c98e602"
+          ],
+          "path": "rules/web/webserver_generic/web_source_code_enumeration.yml",
+          "authors": [
+            "James Ahearn"
+          ],
+          "relationship": "corroborates"
+        }
+      ],
+      "false_positives": [
+        "Authorized scanners and security monitoring."
+      ],
+      "tuning": "Add application-specific sensitive paths and allowlist scanner IP ranges.",
+      "requirements": {
+        "all_fields": [
+          "edgeendtimestamp",
+          "clientip",
+          "clientrequestpath"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "event_time",
+          "stateful_aggregation"
+        ]
+      },
+      "family": "http.recon.sensitive-path-sweep",
+      "variant": "aggregate"
+    },
+    {
+      "id": "http.dos.request-burst",
+      "title": "Single-client request burst",
+      "description": "Detects a high request count from one client over one minute.",
+      "kind": "aggregate",
+      "status": "test",
+      "severity": "medium",
+      "confidence": "low",
+      "category": "dos",
+      "attack": {
+        "techniques": [
+          "T1498.001"
+        ]
+      },
+      "required_fields": [
+        "edgeendtimestamp",
+        "clientip"
+      ],
+      "aggregate": {
+        "group_by": [
+          "clientip"
+        ],
+        "window_seconds": 60,
+        "metrics": [
+          {
+            "name": "requests",
+            "op": "count"
+          }
+        ],
+        "having": {
+          "metric": "requests",
+          "op": "gte",
+          "value": 300
+        }
+      },
+      "provenance": [
+        {
+          "source": "mitre-car",
+          "upstream_ids": [
+            "CAR-2021-01-001"
+          ],
+          "path": "analytics/CAR-2021-01-001.yaml",
+          "authors": [
+            "Cyware Labs",
+            "MITRE"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Large NATs, API clients, crawlers, load tests, and traffic spikes."
+      ],
+      "tuning": "This is a baseline starting point, not a universal threshold. Segment by host and known client class.",
+      "requirements": {
+        "all_fields": [
+          "edgeendtimestamp",
+          "clientip"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "event_time",
+          "stateful_aggregation"
+        ]
+      },
+      "family": "http.dos.request-burst",
+      "variant": "aggregate"
+    },
+    {
+      "id": "http.attack.distributed-payload-campaign",
+      "title": "Distributed identical malicious payload campaign",
+      "description": "Detects the same suspicious URI being requested by many distinct source IPs in a short window.",
+      "kind": "aggregate",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "reconnaissance",
+      "attack": {
+        "techniques": [
+          "T1595.002",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "edgeendtimestamp",
+        "clientip",
+        "clientrequesturi"
+      ],
+      "aggregate": {
+        "group_by": [
+          "clientrequesturi"
+        ],
+        "window_seconds": 600,
+        "prefilter": {
+          "field": "clientrequesturi",
+          "op": "regex",
+          "value": "(?:\\.env|\\.git|etc/passwd|wp-login|xmlrpc|phpmyadmin|actuator|jndi|union(?:%20|\\s)+select|<script|%3cscript)",
+          "flags": [
+            "i"
+          ]
+        },
+        "metrics": [
+          {
+            "name": "requests",
+            "op": "count"
+          },
+          {
+            "name": "sources",
+            "op": "distinct_count",
+            "field": "clientip"
+          }
+        ],
+        "having": {
+          "all": [
+            {
+              "metric": "requests",
+              "op": "gte",
+              "value": 20
+            },
+            {
+              "metric": "sources",
+              "op": "gte",
+              "value": 10
+            }
+          ]
+        }
+      },
+      "provenance": [
+        {
+          "source": "gcp-security-analytics",
+          "upstream_ids": [
+            "6.22"
+          ],
+          "path": "backends/bigquery/sql/6_22_log4j_exploit_attempts_remote_IP_address_list.sql",
+          "authors": [
+            "Google LLC",
+            "Don Sailing (CYDERES)"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "mitre-car",
+          "upstream_ids": [
+            "CAR-2021-01-001"
+          ],
+          "path": "analytics/CAR-2021-01-001.yaml",
+          "authors": [
+            "Cyware Labs",
+            "MITRE"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Coordinated security scans and widespread benign clients requesting a missing common asset."
+      ],
+      "tuning": "Hash or truncate the grouping URI after stable canonicalization to bound memory and prevent attacker-controlled cardinality.",
+      "requirements": {
+        "all_fields": [
+          "edgeendtimestamp",
+          "clientip",
+          "clientrequesturi"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "event_time",
+          "stateful_aggregation"
+        ]
+      },
+      "family": "http.attack.distributed-payload-campaign",
+      "variant": "aggregate"
+    },
+    {
+      "id": "http.sqli.request-body",
+      "family": "http.sqli",
+      "variant": "request_body",
+      "title": "SQL injection payload in request body",
+      "description": "Detects high-signal SQL union, boolean, timing, metadata, and command-execution patterns in a decoded request body.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "sqli",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "(?:union(?:\\s+all)?\\s+select|(?:or|and)\\s+[\\x22\\x27]?[0-9]+[\\x22\\x27]?\\s*=\\s*[\\x22\\x27]?[0-9]+|information_schema\\.(?:tables|columns)|@@version|(?:sleep|pg_sleep|benchmark)\\s*\\(|waitfor\\s+delay|load_file\\s*\\(|into\\s+(?:out|dump)file|xp_cmdshell)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "942100",
+            "942101",
+            "942130",
+            "942160",
+            "942170",
+            "942190",
+            "942200",
+            "942280",
+            "942320",
+            "942361"
+          ],
+          "path": "rules/REQUEST-942-APPLICATION-ATTACK-SQLI.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "APIs intentionally accepting SQL, query builders, or code snippets."
+      ],
+      "tuning": "Apply content-type and route-aware suppression. Enforce body size and decompression limits before evaluation."
+    },
+    {
+      "id": "http.xss.request-body",
+      "family": "http.xss",
+      "variant": "request_body",
+      "title": "Cross-site scripting payload in request body",
+      "description": "Detects scriptable tags, event handlers, JavaScript URIs, and browser object access in decoded form or JSON bodies.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "xss",
+      "attack": {
+        "techniques": [
+          "T1189",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "(?:<\\s*(?:script|iframe|svg|img|object|embed)\\b|javascript\\s*:|(?:onerror|onload|onmouseover|onfocus|onresize)\\s*=|document\\.(?:cookie|domain|location)|(?:alert|prompt|confirm)\\s*\\()",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "941100",
+            "941101",
+            "941110",
+            "941120",
+            "941130",
+            "941140",
+            "941160",
+            "941170",
+            "941320"
+          ],
+          "path": "rules/REQUEST-941-APPLICATION-ATTACK-XSS.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "65354b83-a2ea-4ea6-8414-3ab38be0d409"
+          ],
+          "path": "rules/web/webserver_generic/web_xss_in_access_logs.yml",
+          "authors": [
+            "Saw Win Naung",
+            "Nasreddine Bencherchali"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "WYSIWYG editors, HTML form builders, and APIs designed to accept markup."
+      ],
+      "tuning": "Restrict exclusions to known rich-content fields rather than the entire endpoint."
+    },
+    {
+      "id": "http.ssti.request-body",
+      "family": "http.ssti",
+      "variant": "request_body",
+      "title": "Server-side template injection in request body",
+      "description": "Detects Jinja, Twig, Freemarker, Java EL, ERB, and dangerous template object access in decoded request bodies.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "medium",
+      "category": "ssti",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "(?:\\{\\{[^}]{0,200}(?:config|class|mro|subclasses|cycler|joiner)|\\$\\{[^}]{0,200}(?:runtime|classloader|getclass)|<%=[^%]{0,200}%>|freemarker\\.template\\.utility\\.execute|javax\\.script\\.scriptenginemanager)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "934180",
+            "934200"
+          ],
+          "path": "rules/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "sigma",
+          "upstream_ids": [
+            "ada3bc4f-f0fd-42b9-ba91-e105e8af7342"
+          ],
+          "path": "rules/web/webserver_generic/web_ssti_in_access_logs.yml",
+          "authors": [
+            "Nasreddine Bencherchali (Nextron Systems)"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Template editors, CI configuration APIs, and developer playgrounds."
+      ],
+      "tuning": "Score dangerous object tokens more highly than delimiter-only matches."
+    },
+    {
+      "id": "http.rce.command-injection-request-body",
+      "family": "http.rce.unix-command-injection",
+      "variant": "request_body",
+      "title": "Command injection payload in request body",
+      "description": "Detects shell separators or substitutions followed by high-signal system commands in request bodies.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "command_injection",
+      "attack": {
+        "techniques": [
+          "T1059.004",
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "(?:;|\\||&&|`|\\$\\()(?:[ \\t]*(?:id|whoami|uname|cat|curl|wget|nc|bash|sh|chmod|chown|python|perl|ruby|busybox)\\b)",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2",
+          "html_entity_decode"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "932130",
+            "932160",
+            "932220",
+            "932230",
+            "932231",
+            "932235",
+            "932250",
+            "932260",
+            "932270"
+          ],
+          "path": "rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Build APIs, shell consoles, and developer automation endpoints."
+      ],
+      "tuning": "Restrict body retention and alert excerpts to the smallest evidence span."
+    },
+    {
+      "id": "http.java.deserialization-request-body",
+      "family": "http.java.deserialization",
+      "variant": "request_body",
+      "title": "Java serialized object in request body",
+      "description": "Detects binary or Base64 Java serialization magic and common gadget-chain markers in request bodies.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "deserialization",
+      "cves": [
+        "CVE-2015-4852",
+        "CVE-2017-9805"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "(?:\\xac\\xed\\x00\\x05|rO0AB|java\\.lang\\.(?:runtime|processbuilder)|commonscollections|commonsbeanutils|ysoserial)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "944100",
+            "944110",
+            "944120",
+            "944200",
+            "944210",
+            "944240",
+            "944250",
+            "944260"
+          ],
+          "path": "rules/REQUEST-944-APPLICATION-ATTACK-JAVA.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Java serialization gateways and security research systems."
+      ],
+      "tuning": "Preserve binary bodies losslessly or expose a Base64 representation with an explicit adapter contract."
+    },
+    {
+      "id": "http.exploit.log4shell-request-body",
+      "family": "http.exploit.log4shell",
+      "variant": "request_body",
+      "title": "Log4Shell JNDI lookup in request body",
+      "description": "Detects literal or encoded JNDI lookup expressions in request bodies.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2021-44228"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "(?:\\$|%24)(?:\\{|%7b)[^}]{0,240}j[^}]{0,20}n[^}]{0,20}d[^}]{0,20}i(?:\\s|%20)*(?::|%3a)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "944150",
+            "944151",
+            "944152"
+          ],
+          "path": "rules/REQUEST-944-APPLICATION-ATTACK-JAVA.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "158b68fa-5d1a-11ec-aac8-acde48001122"
+          ],
+          "path": "detections/web/hunting_for_log4shell.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Security scanners and systems intentionally storing exploit strings."
+      ],
+      "tuning": "Apply to textual and structured bodies after bounded decompression."
+    },
+    {
+      "id": "http.exploit.spring4shell-request-body",
+      "family": "http.exploit.spring4shell",
+      "variant": "request_body",
+      "title": "Spring4Shell class-loader payload in request body",
+      "description": "Detects the Spring class-loader property chain and JSP webshell configuration in POST form data.",
+      "kind": "event",
+      "status": "production",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2022-22965"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "field": "requestbody",
+            "op": "regex",
+            "value": "class(?:\\.module)?\\.classloader\\.resources\\.context\\.parent\\.pipeline\\.first\\.(?:pattern|suffix|directory|prefix|filedateformat)=",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_1"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "fcdfd69d-0ca3-4476-920e-9b633cb4593e"
+          ],
+          "path": "detections/web/web_spring4shell_http_request_class_module.yml",
+          "authors": [
+            "Michael Haag",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Security tests and unusual Java configuration-management APIs."
+      ],
+      "tuning": "Require the full property-chain prefix; do not reduce this to generic class.module tokens."
+    },
+    {
+      "id": "http.exploit.react2shell-request-body",
+      "family": "http.exploit.react2shell",
+      "variant": "request_body",
+      "title": "React Server Components RCE payload",
+      "description": "Detects React Flight reference structure combined with prototype-pollution keys in a POST body.",
+      "kind": "event",
+      "status": "test",
+      "severity": "critical",
+      "confidence": "high",
+      "category": "vulnerability_exploit",
+      "cves": [
+        "CVE-2025-55182",
+        "CVE-2025-66478"
+      ],
+      "attack": {
+        "techniques": [
+          "T1190",
+          "T1059.007"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST"
+          },
+          {
+            "field": "requestbody",
+            "op": "regex",
+            "value": "\\$[0-9]+:[a-zA-Z_0-9]+:[a-zA-Z_0-9]+"
+          },
+          {
+            "field": "requestbody",
+            "op": "regex",
+            "value": "(?:__proto__|constructor(?:\\.|%2e)prototype)",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_1"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "elastic-detection-rules",
+          "upstream_ids": [
+            "a8f7e9d4-3b2c-4d5e-8f1a-6c9b0e2d4a7f"
+          ],
+          "path": "rules/network/initial_access_react_server_components_rce_attempt.toml",
+          "authors": [
+            "Elastic"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Security scanners reproducing the exploit structure."
+      ],
+      "tuning": "The upstream rule also uses response-body evidence. This request-only variant is therefore test status."
+    },
+    {
+      "id": "http.protocol.duplicate-raw-header",
+      "family": "http.protocol.request-smuggling",
+      "variant": "raw_headers",
+      "title": "Duplicate raw HTTP request header",
+      "description": "Detects repeated request header field names before an intermediary collapses them into a map.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "high",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestheadersraw"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestheadersraw"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "raw_request_headers"
+        ]
+      },
+      "match": {
+        "field": "requestheadersraw",
+        "op": "array_duplicate_header_name",
+        "values": [
+          "set-cookie",
+          "accept-encoding",
+          "connection"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "920181",
+            "920620",
+            "921110"
+          ],
+          "path": "rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf; rules/REQUEST-921-PROTOCOL-ATTACK.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "1606cc5b-fd5f-4865-9fe3-0ed1eaec2df6"
+          ],
+          "path": "detections/web/http_duplicated_header.yml",
+          "authors": [
+            "Raven Tait",
+            "Splunk"
+          ],
+          "relationship": "derived"
+        }
+      ],
+      "false_positives": [
+        "Headers whose grammar legitimately permits repeated instances and adapters that split comma lists incorrectly."
+      ],
+      "tuning": "Preserve original header instances and ordering. Repeated Accept-Encoding and Connection alone are ignored because RFC 9110 sections 5.2, 7.6.1, and 12.5.3 permit combining their list-valued fields. This does not validate their values or HTTP-version legality. Host, Content-Length, and Transfer-Encoding duplicates still alert. Other list-valued headers can still produce noise; expand exemptions only after protocol review."
+    },
+    {
+      "id": "http.response.information-leakage",
+      "family": "http.response.information-leakage",
+      "variant": "response_body",
+      "title": "Database error, stack trace, or source information leakage",
+      "description": "Detects database engine errors and Java, PHP, ASP.NET, or IIS diagnostic details exposed in a response body.",
+      "kind": "event",
+      "status": "production",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "data_leakage",
+      "attack": {
+        "techniques": [
+          "T1213"
+        ]
+      },
+      "required_fields": [
+        "responsebody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "responsebody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "response_body"
+        ]
+      },
+      "match": {
+        "field": "responsebody",
+        "op": "regex",
+        "value": "(?:you have an error in your sql syntax|warning: mysql_|pg_query\\(|postgresql.*error|ora-[0-9]{5}|sqlstate\\[[0-9a-z]+\\]|exception in thread \\x22|at [a-z0-9_.$]+\\([a-z0-9_]+\\.java:[0-9]+\\)|fatal error:|stack trace:|server error in '/[^']*' application|system\\.(?:web|io)\\.[a-z]+exception)",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "950150",
+            "951110",
+            "951120",
+            "951220",
+            "951230",
+            "951240",
+            "951250",
+            "952110",
+            "953100",
+            "953110",
+            "953120",
+            "954100",
+            "954120"
+          ],
+          "path": "rules/RESPONSE-950-DATA-LEAKAGES.conf; rules/RESPONSE-951-DATA-LEAKAGES-SQL.conf; rules/RESPONSE-952-DATA-LEAKAGES-JAVA.conf; rules/RESPONSE-953-DATA-LEAKAGES-PHP.conf; rules/RESPONSE-954-DATA-LEAKAGES-IIS.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Developer documentation and observability interfaces intentionally displaying errors."
+      ],
+      "tuning": "Sample and redact response evidence; never persist full responses solely for alerting."
+    },
+    {
+      "id": "http.upload.server-script",
+      "family": "http.upload.server-script",
+      "variant": "upload_filename",
+      "title": "Server-side script filename in file upload",
+      "description": "Flags executable upload extensions, including trailing-dot and null/semicolon variants. Filename evidence alone does not establish execution.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "file_upload",
+      "attack": {
+        "techniques": [
+          "T1505.003"
+        ]
+      },
+      "required_fields": [
+        "uploadedfilenames"
+      ],
+      "requirements": {
+        "all_fields": [
+          "uploadedfilenames"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "file_upload_metadata"
+        ]
+      },
+      "match": {
+        "field": "uploadedfilenames",
+        "op": "array_value_regex",
+        "value": "\\.(?:php[0-9]*|phtml|phar|phps|pht|phpt|jsp|jspx|asp|aspx|ashx|asmx)(?:[. \\t]*$|[\\x00;])",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "933110"
+          ],
+          "path": "rules/REQUEST-933-APPLICATION-ATTACK-PHP.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "File_Upload_Cheat_Sheet#extension-validation"
+          ],
+          "path": "cheatsheets/File_Upload_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Allow authorized code/package upload routes. Evaluate decoded client filenames before basename stripping."
+    },
+    {
+      "id": "http.upload.path-traversal",
+      "family": "http.lfi.path-traversal",
+      "variant": "upload_filename",
+      "title": "Traversal components in uploaded filename",
+      "description": "Flags parent-directory components in upload filenames before path sanitization.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "file_upload",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "uploadedfilenames"
+      ],
+      "requirements": {
+        "all_fields": [
+          "uploadedfilenames"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "file_upload_metadata"
+        ]
+      },
+      "match": {
+        "field": "uploadedfilenames",
+        "op": "array_value_regex",
+        "value": "(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)"
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "File_Upload_Cheat_Sheet#filename-safety"
+          ],
+          "path": "cheatsheets/File_Upload_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Preserve path separators in the adapter; a basename-only field cannot support this rule."
+    },
+    {
+      "id": "http.upload.server-config",
+      "family": "http.upload.server-config",
+      "variant": "upload_filename",
+      "title": "Server configuration filename in file upload",
+      "description": "Flags uploads named for web-server or per-directory interpreter configuration, which can alter how nearby files execute.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "file_upload",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "uploadedfilenames"
+      ],
+      "requirements": {
+        "all_fields": [
+          "uploadedfilenames"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "file_upload_metadata"
+        ]
+      },
+      "match": {
+        "field": "uploadedfilenames",
+        "op": "array_value_regex",
+        "value": "(?:^|[/\\\\])(?:\\.htaccess|\\.user\\.ini|web\\.config)[. \\t]*$",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "File_Upload_Cheat_Sheet#filename-safety"
+          ],
+          "path": "cheatsheets/File_Upload_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Restrict to file-upload endpoints that do not intentionally accept application deployment bundles."
+    },
+    {
+      "id": "http.upload.php-session-file",
+      "family": "http.upload.php-session-file",
+      "variant": "upload_filename",
+      "title": "PHP session filename upload attempt",
+      "description": "Identifies upload names shaped like PHP session storage, including the SessionReaper attack class. A matching filename does not identify a vulnerable product.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "file_upload",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "uploadedfilenames"
+      ],
+      "requirements": {
+        "all_fields": [
+          "uploadedfilenames"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "file_upload_metadata"
+        ]
+      },
+      "match": {
+        "field": "uploadedfilenames",
+        "op": "array_value_regex",
+        "value": "(?:^|[/\\\\])sess_[,a-z0-9-]{20,256}$",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "933220"
+          ],
+          "path": "rules/REQUEST-933-APPLICATION-ATTACK-PHP.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Correlate with application identity and the upload destination before attributing CVE-2025-54236.",
+      "cves": [
+        "CVE-2025-54236"
+      ]
+    },
+    {
+      "id": "http.upload.php-execution-content",
+      "family": "http.upload.php-execution-content",
+      "variant": "upload_content",
+      "title": "PHP execution primitive inside an uploaded file",
+      "description": "Requires a PHP opening tag and a nearby execution call in the same decoded file part. It is a candidate uploaded webshell signal.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "webshell",
+      "attack": {
+        "techniques": [
+          "T1505.003"
+        ]
+      },
+      "required_fields": [
+        "uploadedfilecontents"
+      ],
+      "requirements": {
+        "all_fields": [
+          "uploadedfilecontents"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "file_upload_content"
+        ]
+      },
+      "match": {
+        "field": "uploadedfilecontents",
+        "op": "array_value_regex",
+        "value": "<\\?php\\b[\\s\\S]{0,512}\\b(?:system|exec|shell_exec|passthru|eval)\\s*\\(",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "933100",
+            "933160"
+          ],
+          "path": "rules/REQUEST-933-APPLICATION-ATTACK-PHP.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        },
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "File_Upload_Cheat_Sheet#filename-safety"
+          ],
+          "path": "cheatsheets/File_Upload_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Source-code repositories and developer uploads are common benign matches. Content beyond the bounded proximity is not covered."
+    },
+    {
+      "id": "http.multipart.deprecated-transfer-encoding",
+      "family": "http.multipart.deprecated-transfer-encoding",
+      "variant": "multipart_metadata",
+      "title": "Content-Transfer-Encoding in a multipart form part",
+      "description": "Flags a deprecated transfer-encoding header inside an actual multipart form part; body text resembling a header is insufficient.",
+      "kind": "event",
+      "status": "test",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "multipartpartheaders"
+      ],
+      "requirements": {
+        "all_fields": [
+          "multipartpartheaders"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "multipart_metadata"
+        ]
+      },
+      "match": {
+        "field": "multipartpartheaders",
+        "op": "array_value_regex",
+        "value": "^content-transfer-encoding[ \\t]*:",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "922120"
+          ],
+          "path": "rules/REQUEST-922-MULTIPART-ATTACK.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Legacy upload clients can use this header legitimately. Treat as a parser-evasion candidate."
+    },
+    {
+      "id": "http.multipart.unsafe-charset",
+      "family": "http.multipart.unsafe-charset",
+      "variant": "multipart_metadata",
+      "title": "Multipart charset outside the supported text encodings",
+      "description": "Flags UTF-7/16/32 declarations in parsed part Content-Type or global _charset_ values that can produce differing decoder views.",
+      "kind": "event",
+      "status": "test",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "protocol_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "multipartcharsets"
+      ],
+      "requirements": {
+        "all_fields": [
+          "multipartcharsets"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "multipart_metadata"
+        ]
+      },
+      "match": {
+        "field": "multipartcharsets",
+        "op": "array_value_regex",
+        "value": "^(?:utf-?7|utf-?16(?:le|be)?|utf-?32(?:le|be)?|unicode-1-1-utf-7)$",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "922100",
+            "922110"
+          ],
+          "path": "rules/REQUEST-922-MULTIPART-ATTACK.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "This is a selected encoding policy, not the full CRS MIME grammar or a complete charset allowlist."
+    },
+    {
+      "id": "http.response.directory-listing",
+      "family": "http.response.directory-listing",
+      "variant": "response_body",
+      "title": "Web directory index returned in response",
+      "description": "Detects common Apache/nginx-style index pages or IIS parent-directory markers in returned HTML.",
+      "kind": "event",
+      "status": "test",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "data_leakage",
+      "attack": {
+        "techniques": [
+          "T1083"
+        ]
+      },
+      "required_fields": [
+        "responsebody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "responsebody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "response_body"
+        ]
+      },
+      "match": {
+        "any": [
+          {
+            "all": [
+              {
+                "field": "responsebody",
+                "op": "regex",
+                "value": "<title>[ \\t\\r\\n]*Index of\\b",
+                "flags": [
+                  "i"
+                ]
+              },
+              {
+                "field": "responsebody",
+                "op": "regex",
+                "value": "<h1>[ \\t\\r\\n]*Index of\\b",
+                "flags": [
+                  "i"
+                ]
+              }
+            ]
+          },
+          {
+            "field": "responsebody",
+            "op": "regex",
+            "value": ">\\[To Parent Directory\\]</a><br\\s*/?>",
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "950130"
+          ],
+          "path": "rules/RESPONSE-950-DATA-LEAKAGES.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Public mirrors deliberately publish indexes. Use route policy and response status to prioritize."
+    },
+    {
+      "id": "http.response.cgi-source",
+      "family": "http.response.source-disclosure",
+      "variant": "cgi_response_body",
+      "title": "CGI interpreter source returned in response",
+      "description": "Detects a response beginning with a recognizable script interpreter line, consistent with source being served instead of executed.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "data_leakage",
+      "attack": {
+        "techniques": [
+          "T1213"
+        ]
+      },
+      "required_fields": [
+        "responsebody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "responsebody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "response_body"
+        ]
+      },
+      "match": {
+        "field": "responsebody",
+        "op": "regex",
+        "value": "^#![ \\t]*/(?:usr/(?:local/)?bin/(?:env[ \\t]+)?|bin/)(?:python[0-9.]*|perl|ruby|bash|sh)\\b"
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "950140"
+          ],
+          "path": "rules/RESPONSE-950-DATA-LEAKAGES.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Script download portals and source viewers are legitimate. Restrict by route and content disposition."
+    },
+    {
+      "id": "http.response.php-source",
+      "family": "http.response.source-disclosure",
+      "variant": "php_response_body",
+      "title": "PHP source returned in response",
+      "description": "Requires both a PHP open tag and a PHP-specific variable or function in the response, reducing keyword-only alerts.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "data_leakage",
+      "attack": {
+        "techniques": [
+          "T1213"
+        ]
+      },
+      "required_fields": [
+        "responsebody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "responsebody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "response_body"
+        ]
+      },
+      "match": {
+        "all": [
+          {
+            "field": "responsebody",
+            "op": "regex",
+            "value": "<\\?(?:php\\b|=)",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "responsebody",
+            "op": "regex",
+            "value": "(?:\\$_(?:GET|POST|SESSION|COOKIE|SERVER)\\b|\\b(?:session_start|mysqli_connect|move_uploaded_file)\\s*\\()",
+            "flags": [
+              "i"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "953110",
+            "953120"
+          ],
+          "path": "rules/RESPONSE-953-DATA-LEAKAGES-PHP.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Developer documentation and intentional source exports can match; no HTML-entity decoding is applied."
+    },
+    {
+      "id": "http.response.ruby-template-source",
+      "family": "http.response.source-disclosure",
+      "variant": "ruby_response_body",
+      "title": "Sensitive Ruby template expression returned in response",
+      "description": "Flags unrendered ERB expressions that reference environment secrets, Rails credentials, or local files.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "data_leakage",
+      "attack": {
+        "techniques": [
+          "T1213"
+        ]
+      },
+      "required_fields": [
+        "responsebody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "responsebody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "response_body"
+        ]
+      },
+      "match": {
+        "field": "responsebody",
+        "op": "regex",
+        "value": "<%=[ \\t\\r\\n]*(?:ENV[ \\t]*\\[|Rails\\.application\\.(?:credentials|secrets)\\b|File\\.read[ \\t]*\\()"
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "956110"
+          ],
+          "path": "rules/RESPONSE-956-DATA-LEAKAGES-RUBY.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Intentional Ruby source examples are benign; this covers selected ERB constructs rather than all template leakage."
+    },
+    {
+      "id": "http.api.graphql-introspection",
+      "family": "http.api.graphql-introspection",
+      "variant": "graphql_ast",
+      "title": "GraphQL schema introspection request",
+      "description": "Identifies schema-discovery fields from a parsed GraphQL operation. __typename alone, comments, aliases, and string literals do not qualify.",
+      "kind": "event",
+      "status": "test",
+      "severity": "low",
+      "confidence": "medium",
+      "category": "reconnaissance",
+      "attack": {
+        "techniques": [
+          "T1595.002"
+        ]
+      },
+      "required_fields": [
+        "graphqlfieldnames"
+      ],
+      "requirements": {
+        "all_fields": [
+          "graphqlfieldnames"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "graphql_ast"
+        ]
+      },
+      "match": {
+        "field": "graphqlfieldnames",
+        "op": "array_contains_any",
+        "values": [
+          "__schema",
+          "__type"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "GraphQL_Cheat_Sheet#introspection--graphiql"
+          ],
+          "path": "cheatsheets/GraphQL_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Introspection is normal for developer tools and public APIs. Enable only where route policy makes it noteworthy."
+    },
+    {
+      "id": "http.api.graphql-complexity",
+      "family": "http.api.graphql-complexity",
+      "variant": "graphql_ast",
+      "title": "GraphQL depth or alias-count threshold exceeded",
+      "description": "Flags parsed operation depth above 20 or more than 100 aliases. These are locally chosen candidate thresholds, not universal attack boundaries.",
+      "kind": "event",
+      "status": "test",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "dos",
+      "attack": {
+        "techniques": [
+          "T1499.003"
+        ]
+      },
+      "required_fields": [
+        "graphqlaliascount",
+        "graphqlmaxdepth"
+      ],
+      "requirements": {
+        "all_fields": [],
+        "any_fields": [
+          [
+            "graphqlmaxdepth",
+            "graphqlaliascount"
+          ]
+        ],
+        "capabilities": [
+          "graphql_ast"
+        ]
+      },
+      "match": {
+        "any": [
+          {
+            "field": "graphqlmaxdepth",
+            "op": "gt",
+            "value": 20
+          },
+          {
+            "field": "graphqlaliascount",
+            "op": "gt",
+            "value": 100
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "GraphQL_Cheat_Sheet#query-limiting-depth--amount"
+          ],
+          "path": "cheatsheets/GraphQL_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Tune for the schema. Count selected operations with fragments expanded and cycles rejected; this is not resolver cost analysis."
+    },
+    {
+      "id": "http.api.graphql-batch",
+      "family": "http.api.graphql-batch",
+      "variant": "graphql_batch",
+      "title": "Large GraphQL operation batch",
+      "description": "Flags a parsed HTTP GraphQL batch containing more than 10 operation requests. Ordinary JSON arrays are not GraphQL batches.",
+      "kind": "event",
+      "status": "test",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": "dos",
+      "attack": {
+        "techniques": [
+          "T1499.003"
+        ]
+      },
+      "required_fields": [
+        "graphqlbatchsize"
+      ],
+      "requirements": {
+        "all_fields": [
+          "graphqlbatchsize"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "graphql_batch"
+        ]
+      },
+      "match": {
+        "field": "graphqlbatchsize",
+        "op": "gt",
+        "value": 10
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "GraphQL_Cheat_Sheet#batching-attacks"
+          ],
+          "path": "cheatsheets/GraphQL_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "The threshold is locally selected. Tune batching policy and account for legitimate SDK batching."
+    },
+    {
+      "id": "http.authentication.jwt-none",
+      "family": "http.authentication.jwt-none",
+      "variant": "jwt_header",
+      "title": "JWT using the unsecured none algorithm",
+      "description": "Flags the unsecured JOSE algorithm in a structurally parsed compact JWT header. This does not establish that the application accepted it.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "authentication_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "jwtalgorithm"
+      ],
+      "requirements": {
+        "all_fields": [
+          "jwtalgorithm"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "parsed_jwt"
+        ]
+      },
+      "match": {
+        "field": "jwtalgorithm",
+        "op": "eq",
+        "value": "none",
+        "flags": [
+          "i"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "JSON_Web_Token_Cheat_Sheet#unsecured-jwts"
+          ],
+          "path": "cheatsheets/JSON_Web_Token_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Unsigned JWTs may be intentional in a protected protocol. Match only the token presented for authentication."
+    },
+    {
+      "id": "http.authentication.jwt-kid-traversal",
+      "family": "http.authentication.jwt-kid-traversal",
+      "variant": "jwt_header",
+      "title": "Traversal sequence in JWT verification key identifier",
+      "description": "Flags path traversal components in the decoded JOSE kid header that could reach a filesystem key lookup.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "authentication_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "jwtkeyid"
+      ],
+      "requirements": {
+        "all_fields": [
+          "jwtkeyid"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "parsed_jwt"
+        ]
+      },
+      "match": {
+        "field": "jwtkeyid",
+        "op": "regex",
+        "value": "(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)"
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "JSON_Web_Token_Cheat_Sheet#trusting-key-material-named-in-the-token-header"
+          ],
+          "path": "cheatsheets/JSON_Web_Token_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Do not URL-decode kid unless the application does. A suspicious key identifier does not prove signature verification was bypassed."
+    },
+    {
+      "id": "http.api.json-prototype-pollution",
+      "family": "http.injection.node-prototype-pollution",
+      "variant": "json_keys",
+      "title": "Prototype-chain keys in parsed JSON request",
+      "description": "Flags prototype-chain property paths in parsed JSON keys, including escaped keys after JSON decoding; quoted descriptions are excluded.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "code_injection",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestjsonpaths"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestjsonpaths"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "parsed_json_body"
+        ]
+      },
+      "match": {
+        "field": "requestjsonpaths",
+        "op": "array_value_regex",
+        "value": "/(?:__proto__(?:/|$)|constructor/prototype(?:/|$))"
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "934130"
+          ],
+          "path": "rules/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Only keys count. Trusted schema editors can contain these keys. The adapter must retain every object path before unsafe object merging."
+    },
+    {
+      "id": "http.api.nosql-auth-operator",
+      "family": "http.api.nosql-auth-operator",
+      "variant": "json_keys",
+      "title": "NoSQL operator submitted to an authentication endpoint",
+      "description": "Requires an authentication route and parsed JSON query-operator keys, consistent with a NoSQL login bypass attempt.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "authentication_attack",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequesturi",
+        "requestjsonpaths"
+      ],
+      "requirements": {
+        "all_fields": [
+          "clientrequesturi",
+          "requestjsonpaths"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "parsed_json_body"
+        ]
+      },
+      "match": {
+        "all": [
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "(?:^|/)(?:login|signin|auth|authenticate|session)(?:[/?]|$)",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_1",
+              "path_only"
+            ]
+          },
+          {
+            "field": "requestjsonpaths",
+            "op": "array_value_regex",
+            "value": "/\\$(?:ne|gt|gte|nin|regex|where|expr)(?:/|$)"
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "NoSQL_Security_Cheat_Sheet#prevent-nosql-injection"
+          ],
+          "path": "cheatsheets/NoSQL_Security_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Adjust route patterns and accepted JSON schema. Database administration or custom query APIs can legitimately accept these keys."
+    },
+    {
+      "id": "http.ssrf.cloud-metadata-request-body",
+      "family": "http.ssrf.cloud-metadata",
+      "variant": "request_body",
+      "title": "Cloud metadata URL in request body",
+      "description": "Flags explicit cloud-metadata URLs in a decoded request body, extending the URI-only metadata family.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "ssrf",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "(?:https?://(?:169\\.254\\.169\\.254|100\\.100\\.100\\.200|metadata\\.google\\.internal|\\[fd00:ec2::254\\])(?::[0-9]+)?(?:/|[ \\t\\r\\n\"'<>]|$))",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "crs",
+          "upstream_ids": [
+            "934110"
+          ],
+          "path": "rules/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf",
+          "authors": [
+            "OWASP CRS contributors"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Configuration uploads and security documentation can contain these URLs. Coverage excludes DNS rebinding and nonstandard numeric IP representations."
+    },
+    {
+      "id": "http.xxe.external-entity-request-body",
+      "family": "http.xxe.external-entity-request-body",
+      "variant": "request_body",
+      "title": "External XML entity or DTD declaration in request body",
+      "description": "Flags external file or network identifiers in XML ENTITY/DOCTYPE declarations. It observes syntax without resolving entities.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "code_injection",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "<![ \\t\\r\\n]*(?:ENTITY[ \\t\\r\\n]+(?:%[ \\t\\r\\n]+)?[A-Za-z_:][A-Za-z0-9_.:-]*|DOCTYPE[ \\t\\r\\n]+[A-Za-z_:][A-Za-z0-9_.:-]*)[ \\t\\r\\n]+(?:SYSTEM[ \\t\\r\\n]+[\"'](?:file|https?|ftp)://|PUBLIC[ \\t\\r\\n]+[\"'][^\"']{1,256}[\"'][ \\t\\r\\n]+[\"'](?:file|https?|ftp)://)",
+        "transforms": [
+          "url_decode_1"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "owasp-cheatsheets",
+          "upstream_ids": [
+            "XML_External_Entity_Prevention_Cheat_Sheet#general-guidance"
+          ],
+          "path": "cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.md",
+          "authors": [
+            "OWASP Cheat Sheet Series Team"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Legacy XML formats use external DTDs. Comments and embedded examples can match; no entity-expansion or exploit-success claim is made."
+    },
+    {
+      "id": "http.exploit.text4shell-request-body",
+      "family": "http.exploit.text4shell-request-body",
+      "variant": "request_body",
+      "title": "Apache Commons Text dangerous lookup in request body",
+      "description": "Adapts the Text4Shell lookup concept to bounded body expressions with script, URL, or DNS lookup syntax.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "vulnerability_exploit",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "field": "requestbody",
+        "op": "regex",
+        "value": "\\$\\{(?:script:[A-Za-z][A-Za-z0-9_-]*:|url:(?:UTF-8|ISO-8859-1):https?://|dns:(?:address|name|canonical-name)\\|)[^}\\r\\n]{1,1024}\\}",
+        "flags": [
+          "i"
+        ],
+        "transforms": [
+          "url_decode_2"
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "19a481e0-c97c-4d14-b1db-75a708eb592e"
+          ],
+          "path": "detections/web/exploit_public_facing_application_via_apache_commons_text.yml",
+          "authors": [
+            "Michael Haag, Splunk"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "Application configuration may intentionally use lookups. The local conjunction replaces the upstream broad keyword score.",
+      "cves": [
+        "CVE-2022-42889"
+      ]
+    },
+    {
+      "id": "http.exploit.confluence-ognl-request-body",
+      "family": "http.exploit.confluence-ognl",
+      "variant": "request_body",
+      "title": "Confluence text template request with OGNL execution tokens",
+      "description": "Requires the Confluence template endpoint, POST, and an OGNL/Java execution token in the body. It retains failed attempts without a response-status requirement.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "vulnerability_exploit",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "(?:^|/)template/aui/text-inline\\.vm$",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_1",
+              "path_only"
+            ]
+          },
+          {
+            "field": "requestbody",
+            "op": "regex",
+            "value": "(?:ognl\\.Ognl|@java\\.lang\\.(?:Runtime|ProcessBuilder)|freemarker\\.template\\.utility\\.Execute)",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_2"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "f56936c0-ae6f-4eeb-91ff-ecc1448c6105"
+          ],
+          "path": "detections/web/confluence_pre_auth_rce_via_ognl_injection_cve_2023_22527.yml",
+          "authors": [
+            "Michael Haag, Splunk"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "An adaptation with stronger payload evidence than the upstream endpoint/status query; scope to Confluence assets.",
+      "cves": [
+        "CVE-2023-22527"
+      ]
+    },
+    {
+      "id": "http.exploit.ivanti-epm-recordgoodapp-sqli",
+      "family": "http.exploit.ivanti-epm-recordgoodapp-sqli",
+      "variant": "request_body",
+      "title": "Ivanti EPM RecordGoodApp SQL command execution attempt",
+      "description": "Requires the EPM SOAP endpoint, POST, RecordGoodApp, and xp_cmdshell body evidence, consistent with the CVE-2024-29824 exploit path.",
+      "kind": "event",
+      "status": "test",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "vulnerability_exploit",
+      "attack": {
+        "techniques": [
+          "T1190"
+        ]
+      },
+      "required_fields": [
+        "clientrequestmethod",
+        "clientrequesturi",
+        "requestbody"
+      ],
+      "requirements": {
+        "all_fields": [
+          "clientrequestmethod",
+          "clientrequesturi",
+          "requestbody"
+        ],
+        "any_fields": [],
+        "capabilities": [
+          "request_body"
+        ]
+      },
+      "match": {
+        "all": [
+          {
+            "field": "clientrequestmethod",
+            "op": "eq",
+            "value": "POST",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "clientrequesturi",
+            "op": "regex",
+            "value": "(?:^|/)WSStatusEvents/EventHandler\\.asmx$",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "url_decode_1",
+              "path_only"
+            ]
+          },
+          {
+            "field": "requestbody",
+            "op": "regex",
+            "value": "<(?:(?:[A-Za-z_][A-Za-z0-9_.-]*):)?RecordGoodApp(?:[ \\t\\r\\n>])",
+            "flags": [
+              "i"
+            ]
+          },
+          {
+            "field": "requestbody",
+            "op": "regex",
+            "value": "\\bxp_cmdshell\\b",
+            "flags": [
+              "i"
+            ],
+            "transforms": [
+              "html_entity_decode"
+            ]
+          }
+        ]
+      },
+      "provenance": [
+        {
+          "source": "splunk-security-content",
+          "upstream_ids": [
+            "e20564ca-c86c-4e30-acdb-a8486673426f"
+          ],
+          "path": "detections/web/ivanti_epm_sql_injection_remote_code_execution.yml",
+          "authors": [
+            "Michael Haag"
+          ],
+          "relationship": "adapted"
+        }
+      ],
+      "false_positives": [
+        "Authorized testing or application-specific use; validate against the endpoint's intended behavior."
+      ],
+      "tuning": "No success/status assumption is made. SOAP/XML obfuscation beyond entity decoding requires a richer parser.",
+      "cves": [
+        "CVE-2024-29824"
+      ]
+    }
+  ]
+}
