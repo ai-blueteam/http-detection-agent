@@ -66,7 +66,7 @@ def create_server(backend: Backend):
         Writes a new local summary; optionally writes attributed findings, never returned here.
         Aggregates require events_only=false and ordered event timestamps. Missing/invalid/late
         data is not silently skipped. Check summary.complete and exit_code before using results.
-        Parquet import and sorting remain CLI operations. Maximum threads are configured at startup.
+        Event-time sorting remains a CLI operation. Maximum threads are configured at startup.
         """
         with expected_errors():
             return await backend.scan_http(input_path, profile, status, matcher, events_only,

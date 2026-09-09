@@ -26,7 +26,7 @@ http-detect scan /path/to/requests.ndjson --profile profiles/cloudflare-log-expl
 
 Use the built binary's absolute path if it is not on PATH; Windows builds use `http-detect.exe`. Parent output directories must exist. Never overwrite earlier evidence.
 
-Event-only scans do not evaluate aggregate rules. For aggregates, require usable event timestamps and ordered input (or an explicitly reviewed bounded lateness policy). Sort with the CLI if needed; read the checkout's ENGINE.md for import/sort and timestamp-unit options. Parquet must be imported with the optional CLI adapter first; do not feed raw Parquet to scan.
+Event-only scans do not evaluate aggregate rules. For aggregates, require usable event timestamps and ordered input (or an explicitly reviewed bounded lateness policy). Sort with the CLI if needed; read the checkout's ENGINE.md for sorting and timestamp-unit options.
 
 ## Interpret without overstating
 

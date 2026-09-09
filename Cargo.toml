@@ -7,8 +7,8 @@ description = "Bounded, parallel HTTP log threat detection with attributed findi
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/ai-blueteam/http-detection-agent"
-# The engine is MIT. Separately loaded rule data retains its upstream licenses;
-# see THIRD_PARTY_NOTICES.md. Registry publication is intentionally disabled.
+# The engine is MIT. Separately loaded rule data retains its upstream licenses.
+# Registry publication is intentionally disabled.
 publish = false
 
 [lib]
@@ -17,10 +17,6 @@ name = "http_detection_agent"
 [[bin]]
 name = "http-detect"
 path = "src/main.rs"
-
-[features]
-default = []
-parquet = ["dep:parquet", "dep:arrow-array"]
 
 [dependencies]
 anyhow = "1"
@@ -38,10 +34,6 @@ percent-encoding = "2"
 html-escape = "0.2"
 sha2 = "0.10"
 tempfile = "3"
-# 58/59 reject unencrypted files with >32768 row groups while assigning i16
-# ordinals. Keep legacy high-row-group-count imports supported.
-parquet = { version = "=56.2.1", optional = true, default-features = false, features = ["arrow", "snap", "flate2-zlib-rs", "zstd", "lz4", "brotli"] }
-arrow-array = { version = "=56.2.1", optional = true }
 
 [profile.release]
 lto = "thin"

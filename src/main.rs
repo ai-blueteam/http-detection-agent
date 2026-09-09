@@ -37,26 +37,6 @@ enum Command {
         #[arg(long, default_value_t = 1_048_576)]
         max_line_bytes: usize,
     },
-    /// Inspect Parquet schema and row groups (requires --features parquet).
-    #[cfg(feature = "parquet")]
-    InspectParquet { input: PathBuf },
-    /// Normalize Internet-background-noise Parquet into reusable streaming NDJSON.
-    #[cfg(feature = "parquet")]
-    ImportIbn {
-        input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
-        #[arg(long)]
-        summary: Option<PathBuf>,
-        #[arg(long)]
-        limit: Option<usize>,
-        #[arg(long, default_value_t = 0)]
-        offset: usize,
-        #[arg(long, default_value_t = 4096)]
-        batch_rows: usize,
-        #[arg(long, default_value_t = 0)]
-        threads: usize,
-    },
     /// Validate and compile the catalog; print coverage and matcher configuration.
     Inspect {
         #[command(flatten)]
@@ -220,34 +200,6 @@ fn main() -> Result<()> {
                 &temp_dir,
                 bytes,
                 max_line_bytes,
-            )?;
-            if let Some(out) = summary_file.as_mut() {
-                serde_json::to_writer_pretty(&mut *out, &result)?;
-                out.write_all(b"\n")?;
-                out.flush()?;
-            }
-            eprintln!("{}", serde_json::to_string(&result)?);
-        }
-        #[cfg(feature = "parquet")]
-        Command::InspectParquet { input } => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&http_detection_agent::ibn::metadata(&input)?)?
-            );
-        }
-        #[cfg(feature = "parquet")]
-        Command::ImportIbn {
-            input,
-            output,
-            summary,
-            limit,
-            offset,
-            batch_rows,
-            threads,
-        } => {
-            let mut summary_file = summary.as_ref().map(create).transpose()?;
-            let result = http_detection_agent::ibn::import(
-                &input, &output, limit, offset, batch_rows, threads,
             )?;
             if let Some(out) = summary_file.as_mut() {
                 serde_json::to_writer_pretty(&mut *out, &result)?;

@@ -90,7 +90,7 @@ class Backend:
         if not candidate.is_file():
             raise ValueError("Input must be a regular file; stdin, devices, and directories are not supported")
         if not candidate.name.lower().endswith((".ndjson", ".jsonl", ".ndjson.gz", ".jsonl.gz", ".ndjson.zst", ".jsonl.zst")):
-            raise ValueError("Use normalized NDJSON/JSONL, optionally gzip or zstd; import Parquet with the CLI first")
+            raise ValueError("Use normalized NDJSON/JSONL, optionally compressed with gzip or zstd")
         return candidate
 
     async def run(self, args: list[str], stdout, stderr):

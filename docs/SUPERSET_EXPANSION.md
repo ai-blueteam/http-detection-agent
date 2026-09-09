@@ -36,7 +36,7 @@ These are selected adaptations, not a complete translation of CRS or source-quer
 | `http.exploit.confluence-ognl-request-body` | request_body | [splunk-security-content: f56936c0-ae6f-4eeb-91ff-ecc1448c6105](https://github.com/splunk/security_content/blob/4cd62e811c5eddf1245c780d48823d7b38998566/detections/web/confluence_pre_auth_rce_via_ognl_injection_cve_2023_22527.yml) | 2 / 4 |
 | `http.exploit.ivanti-epm-recordgoodapp-sqli` | request_body | [splunk-security-content: e20564ca-c86c-4e30-acdb-a8486673426f](https://github.com/splunk/security_content/blob/4cd62e811c5eddf1245c780d48823d7b38998566/detections/web/ivanti_epm_sql_injection_remote_code_execution.yml) | 2 / 3 |
 
-Source IDs, authors, revision, license and the adaptation relationship are retained in every rule and finding. OWASP Cheat Sheet adaptations add CC-BY-SA-4.0 attribution; see [third-party notices](../THIRD_PARTY_NOTICES.md). Existing CRS, Sigma, Splunk, Elastic and other source revisions remain pinned.
+Source IDs, authors, revision, license and the adaptation relationship are retained in every rule and finding. OWASP Cheat Sheet adaptations add CC-BY-SA-4.0 attribution. Existing CRS, Sigma, Splunk, Elastic and other source revisions remain pinned.
 
 ## Adapter contract
 

@@ -12,7 +12,7 @@ For MCP changes, also run `uv run --project companion --locked python -m unittes
 
 Keep canonical IDs stable, retain source revisions/authors/licenses, and regenerate the compiled profiles when changing catalog data. Do not update the Cloudflare baseline lock merely to make a test pass; changes to that preserved set need explicit review. New heuristics stay `test` until independently reviewed and tuned.
 
-Original code contributions are under the project's MIT license. Detection rules are separately licensed according to their provenance; do not copy incompatible upstream material or label mixed-license rules MIT. Keep every applicable upstream notice and mark adaptations. See [third-party notices](THIRD_PARTY_NOTICES.md).
+Original code contributions are under the project's MIT license. Detection rules retain the licenses recorded in their provenance; preserve attribution and applicable notices when adapting them.
 
 Never commit real traffic, findings, credentials, local paths, generated results, caches, or build outputs. Use fictional fixtures with reserved example domains and addresses. Ignore rules are a safety net, not a substitute for reviewing the exact staged files and Git history before publication.
 

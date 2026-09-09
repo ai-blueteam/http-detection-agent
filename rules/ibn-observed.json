@@ -34,7 +34,7 @@
         {"field": "clientrequesturi", "op": "regex", "value": "[?&]cmd=15(?:&|$)", "transforms": ["url_decode_1"]},
         {"field": "clientrequesturi", "op": "regex", "value": "[?&]system=[^&]+", "transforms": ["url_decode_1"]}
       ]},
-      "provenance": [{"source": "ibn-dataset", "upstream_ids": ["http-2024-10m", "CVE-2024-3273"], "path": "http-2024-10m.parquet: discovery rows 0..49999, nas_sharing.cgi request shape", "authors": ["burpheart (dataset)", "HTTP Threat Engine contributors (independent rule)"], "relationship": "derived"}],
+      "provenance": [{"source": "ibn-dataset", "upstream_ids": ["http-2024-10m", "CVE-2024-3273"], "path": "http-2024-10m: discovery rows 0..49999, nas_sharing.cgi request shape", "authors": ["burpheart (dataset)", "HTTP Threat Engine contributors (independent rule)"], "relationship": "derived"}],
       "false_positives": ["Authorized exploit validation or replay; an arbitrary destination can receive this request."],
       "tuning": "Keep opt-in/test until environment-specific review. No block action is authorized."
     }

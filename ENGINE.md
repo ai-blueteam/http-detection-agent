@@ -7,9 +7,6 @@ A CPU-only Rust streaming detector using the saved, attributed HTTP catalog. The
 ```sh
 cargo build --release --locked
 
-# Optional adapter for the downloaded Parquet dataset
-cargo build --release --locked --features parquet
-
 target/release/http-detect inspect \
   --profile profiles/internet-background-noise.json --status all --matcher plain
 
@@ -21,33 +18,27 @@ target/release/http-detect scan requests.ndjson \
 
 `--matcher plain` compiles each regex pattern once and evaluates predicates on demand with `Regex::is_match`. It does not use RegexSet or share predicate-result caches across rules. `--matcher grouped` uses RegexSet plus shared predicate-result caching. Both preserve short-circuit conditions, SIMD JSON tapes, field projection, lazy transformed-text caching, parallel chunks and exact findings. The default is `grouped`; choose a strategy using measurements on your own representative input.
 
-`--status all` includes test/candidate rules; the safer rule-status default is `production`. No rules, transforms, severities or provenance are changed by matcher selection. The default Cargo build excludes Parquet/Arrow dependencies; `parquet` is the only optional feature.
+`--status all` includes test/candidate rules; the safer rule-status default is `production`. No rules, transforms, severities or provenance are changed by matcher selection.
 
 The current catalog has 76 rules. Its 23 latest additions are test-status candidates; the production selection is unchanged. The normalized-field signatures run under both CPU matchers, but parsed upload, JSON, GraphQL, and JWT fields must come from an adapter implementing [their contracts](docs/SUPERSET_EXPANSION.md). The generic NDJSON reader does not parse those protocols.
 
-## Import and event-time sorting
+## Input preparation and event-time sorting
 
-The adapter is specific to [burpheart/Internet-background-noise](https://huggingface.co/datasets/burpheart/Internet-background-noise), revision `a92ffd4bb88d12a9c8860c375d4135fe24d0c4ce`.
+The detector reads normalized NDJSON/JSONL, optionally compressed with gzip or zstd. Convert source-specific exports with a trusted adapter that implements the [normalized field contract](schema/normalized-http-extensions.json) and advertises only the capabilities it actually preserves.
 
 ```sh
-mkdir -p data runtime
-target/release/http-detect import-ibn \
-  /path/to/http-2024-10m.parquet \
-  --output data/requests.ndjson --summary runtime/import.json
-
-target/release/http-detect sort-by-time data/requests.ndjson \
-  --output data/requests-sorted.ndjson --temp-dir runtime \
+mkdir -p runtime
+target/release/http-detect sort-by-time requests.ndjson \
+  --output runtime/requests-sorted.ndjson --temp-dir runtime \
   --memory-mib 512 --summary runtime/sort.json
 
-target/release/http-detect scan data/requests-sorted.ndjson \
-  --profile profiles/internet-background-noise.json --status all \
-  --max-key-bytes 8192 --matcher plain \
+target/release/http-detect scan runtime/requests-sorted.ndjson \
+  --profile /path/to/source-profile.json --status production \
+  --max-key-bytes 8192 --matcher grouped \
   --output runtime/findings.ndjson --summary runtime/scan.json
 ```
 
-Source timestamps may be unordered, so exact aggregate evaluation requires an event-time-ordered input or an explicit bounded lateness policy. Event-only scanning requires neither sorting nor timestamps. Output paths must be new: findings, summaries and normalized datasets are never overwritten. Downloads, runtime traffic, and generated reports remain local and gitignored. Findings and summaries can contain sensitive source paths, group keys, or traffic metadata; review them before sharing.
-
-The importer projects ten Parquet columns and processes bounded batches. It reconstructs raw header instances from the escaped capture header block, decodes body escapes once into a searchable text view, and retains source row identity and original body/data hashes. It does not reconstruct byte-perfect packets, recover upstream truncation or invent response/status/WAF fields. The source `error` field is a capture/parser flag, not an attack label. Parquet/Arrow 56.2.1 is pinned for compatibility with legacy files containing more row groups than newer readers' signed 16-bit ordinal conversion accepts. Metadata memory is separate from the detector's streaming memory.
+Source timestamps may be unordered, so exact aggregate evaluation requires event-time-ordered input or an explicit bounded lateness policy. Event-only scanning requires neither sorting nor timestamps. Output paths must be new: findings, summaries and sorted datasets are never overwritten. Runtime traffic and generated reports remain local and gitignored. Findings and summaries can contain sensitive source paths, group keys, or traffic metadata; review them before sharing.
 
 ## Execution and limits
 
@@ -61,9 +52,9 @@ The importer projects ten Parquet columns and processes bounded batches. It reco
 - Thresholds are evaluated after expiration and insertion on each contributing request for a group. An alert rearms when that observed state falls below threshold or the group expires. There is no timer-only rearming between contributing requests. Steady expire/insert transitions do not generate duplicate crossing alerts.
 - Findings are per rule/variant, not unique malicious requests. Downstream family rollups must retain every contributing variant's evidence and attribution.
 - Default chunks: 4 MiB; maximum line: 1 MiB. Invalid JSON, oversized lines, bad aggregate timestamps, oversized keys and exhausted budgets fail visibly. `--invalid-policy skip` is explicit and counted.
-- Defaults: 1,000,000 window entries; 200,000 groups; 200,000 pending records; 4,096-byte keys; 1,024 MiB accounted aggregate state. The import example raises the key limit to 8,192 bytes for long URI group keys. `--state-mib` budgets logical state, not process RSS; parser, regex, allocator and output buffers need additional memory. There is no silent state eviction.
+- Defaults: 1,000,000 window entries; 200,000 groups; 200,000 pending records; 4,096-byte keys; 1,024 MiB accounted aggregate state. The sorting example raises the key limit to 8,192 bytes for long URI group keys. `--state-mib` budgets logical state, not process RSS; parser, regex, allocator and output buffers need additional memory. There is no silent state eviction.
 - Every finding includes rule ID, family, severity, confidence, source metadata and upstream author provenance. Event findings include line/byte location; aggregates include group, time window and metric evidence. Do not strip attribution from displayed matches.
-- Failed scans can leave partial output. Check exit status, `complete`, counters and errors before consuming results. Import/sort failures can also leave a partial destination; retry with a new output name.
+- Failed scans can leave partial output. Check exit status, `complete`, counters and errors before consuming results. Sort failures can also leave a partial destination; retry with a new output name.
 - The corpus is unlabeled. Counts, matcher equivalence and throughput do not establish precision, recall, false-positive rates or exploit success. Captured bodies may be incomplete. Keep production rollouts alert-only pending independent, environment-specific review.
 
 ## Rule tuning
@@ -78,6 +69,6 @@ The canonical duplicate-header rule exempts repeated `Accept-Encoding` and `Conn
 python3 scripts/verify_engine.py --output runtime/verification.json
 ```
 
-This runs formatting, Rust tests with and without optional features, Clippy, Python tests, catalog validation, and Python/Rust differential fixtures under both matchers. It builds the binary used for comparison instead of relying on an existing release executable. Only synthetic fixtures are needed. Verification output is local and should not be committed.
+This runs formatting, Rust tests, Clippy, Python tests, catalog validation, and Python/Rust differential fixtures under both matchers. It builds the binary used for comparison instead of relying on an existing release executable. Only synthetic fixtures are needed. Verification output is local and should not be committed.
 
-The engine code is MIT licensed; separately loaded catalogs retain the licenses described in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Do not remove source attribution when displaying findings.
+The engine is MIT licensed. Separately loaded catalogs retain their recorded upstream terms; do not remove source attribution from findings.

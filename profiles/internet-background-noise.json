@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "id": "internet-background-noise",
   "dataset": "normalized.http",
-  "description": "Fields supplied by the Rust import-ibn adapter; no response status/body or provider WAF telemetry is invented.",
+  "description": "Normalized fields mapped from the Internet-background-noise HTTP dataset; no response status/body or provider WAF telemetry is assumed.",
   "fields": ["edgeendtimestamp", "clientip", "clientrequestmethod", "clientrequesturi", "clientrequestpath", "clientrequestuseragent", "clientrequesthost", "clientrequestreferer", "requestheaders", "requestheadersraw", "cookies", "requestbody"],
   "capabilities": ["request_body", "raw_request_headers", "request_header_values", "parsed_cookies", "event_time", "stateful_aggregation"]
 }
